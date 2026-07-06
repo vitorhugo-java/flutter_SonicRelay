@@ -117,6 +117,12 @@ class SignalingClient {
     }
   }
 
+  /// Sends a signaling [type] with [payload] over the current session. Used by
+  /// the WebRTC layer to forward `webrtc.answer` and local `webrtc.ice_candidate`
+  /// messages. No-op if there is no active session.
+  void send(SignalingMessageType type, Map<String, Object?> payload, {String? to}) =>
+      _send(type, payload, to: to);
+
   void _sendViewerReady() =>
       _send(SignalingMessageType.viewerReady, const {});
 

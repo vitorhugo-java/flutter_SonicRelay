@@ -13,7 +13,7 @@ The app uses Feature Driven Development:
 - `lib/core`: reusable technical infrastructure such as HTTP, secure storage, WebSocket, and WebRTC adapters.
 - `lib/features`: user-facing capabilities. Each feature owns its `data`, `domain`, and `presentation` boundaries when applicable.
 
-Riverpod provides state and dependency composition, go_router handles guarded navigation, Dio provides HTTP infrastructure, and sensitive tokens are stored only through a flutter_secure_storage-backed abstraction. The flutter_webrtc package is installed, but real media behavior is intentionally not part of this foundation.
+Riverpod provides state and dependency composition, go_router handles guarded navigation, Dio provides HTTP infrastructure, and sensitive tokens are stored only through a flutter_secure_storage-backed abstraction. The viewer receives audio over WebRTC (`flutter_webrtc`); the backend only handles auth, sessions, and signaling and is never a media relay.
 
 ## Local development
 
@@ -109,10 +109,30 @@ Transport (`lib/core/websocket`) and signaling (`lib/features/signaling`) are sp
 - `WebSocketClient` is a reusable, reconnecting JSON-over-WebSocket transport with exponential backoff. It carries no knowledge of the signaling schema.
 - `SignalingClient` builds the authenticated connection URL from the joined session context, sends `viewer.ready` once the socket opens, replies to `ping` with `pong`, maps every frame through `SignalingMessageMapper` into a typed `SignalingMessage`, and closes the socket (without reconnecting) when it receives `session.ended` or the viewer explicitly leaves.
 
-This issue implements signaling transport and routing only; no WebRTC peer connection or media handling is introduced here. SDP and ICE candidate payloads are never logged.
+Transport (`lib/core/websocket`) and signaling (`lib/features/signaling`) never log SDP or ICE candidate payload bodies.
+
+## WebRTC audio viewer
+
+The Flutter app is the WebRTC **viewer**: it only ever receives a remote audio track. It never captures a microphone, never adds a local track, and never handles video. Media flows peer-to-peer (or through coturn when required) directly between the Windows publisher and the viewer — the backend routes only the signaling envelopes, never the media.
+
+Negotiation runs entirely over the signaling socket described above:
+
+1. `SignalingClient` sends `viewer.ready` once the socket opens.
+2. On `webrtc.offer`, the viewer creates an `RTCPeerConnection`, applies the remote description, creates an answer, sets the local description, and sends `webrtc.answer`.
+3. Local ICE candidates are sent as `webrtc.ice_candidate`; remote candidates are applied as they arrive (candidates received before the offer are buffered and flushed once the remote description is set).
+4. The remote audio track is played through the device's audio output.
+5. The peer connection and audio are torn down explicitly on `session.ended`, when the viewer leaves, or when the view model is disposed.
+
+Responsibilities are split across the standard FDD boundaries:
+
+- `lib/core/webrtc` holds reusable, platform-facing adapters: `RtcIceServerConfig` (ICE/STUN/TURN configuration) and `RtcPeerConnectionFactory` (a thin, testable wrapper over `flutter_webrtc`). No private/production TURN credentials are embedded; the MVP default is a single public STUN server, and configuration can later come from `AppConfig` or the backend.
+- `lib/features/listener/data` holds `WebRtcReceiverService` (the receive-only peer-connection state machine, signaling-agnostic via `handleSignal`/`outboundSignals`) and `AudioReceiverService` (remote audio playback).
+- `lib/features/listener/presentation` holds `ListenerViewModel`, which bridges `SignalingClient` and `WebRtcReceiverService` and exposes `ListenerConnectionState` and coarse `ListenerStats` to `ListenerPage`.
+
+SDP and ICE candidate payload bodies are never logged anywhere in the receiver.
 
 ## UI preview
 
-The current app provides a dark Material 3 shell with reusable controls and connected token authentication. Session discovery and WebRTC audio are not connected yet.
+The current app provides a dark Material 3 shell with reusable controls, connected token authentication, and a listener dashboard that reflects live WebRTC connection state.
 
 To capture Android screenshots, run an emulator, start the app with `flutter run`, navigate through the local preview actions, and use the emulator screenshot control. Recommended captures are the login screen and the listener dashboard at a common phone size such as 1080 × 2400.

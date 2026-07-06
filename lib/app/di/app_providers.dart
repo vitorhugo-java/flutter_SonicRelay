@@ -7,6 +7,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
 import '../../core/storage/secure_token_storage.dart';
+import '../../core/webrtc/rtc_ice_server_config.dart';
+import '../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../core/websocket/websocket_client.dart';
 import '../../features/auth/data/auth_api.dart';
 import '../../features/auth/data/auth_repository.dart';
@@ -15,6 +17,8 @@ import '../../features/devices/data/devices_api.dart';
 import '../../features/devices/data/devices_repository.dart';
 import '../../features/sessions/data/sessions_api.dart';
 import '../../features/sessions/data/sessions_repository.dart';
+import '../../features/listener/data/audio_receiver_service.dart';
+import '../../features/listener/data/webrtc_receiver_service.dart';
 import '../../features/signaling/data/signaling_client.dart';
 import '../env/app_config.dart';
 
@@ -96,3 +100,25 @@ final signalingClientProvider = Provider<SignalingClient>(
     tokenStorage: ref.watch(tokenStorageProvider),
   ),
 );
+
+final rtcIceServerConfigProvider = Provider<RtcIceServerConfig>(
+  (ref) => RtcIceServerConfig.defaults(),
+);
+
+final rtcPeerConnectionFactoryProvider = Provider<RtcPeerConnectionFactory>(
+  (ref) => const FlutterWebRtcPeerConnectionFactory(),
+);
+
+final audioReceiverServiceProvider = Provider<AudioReceiverService>(
+  (ref) => WebRtcAudioReceiverService(),
+);
+
+final webRtcReceiverServiceProvider = Provider<WebRtcReceiverService>((ref) {
+  final service = WebRtcReceiverService(
+    peerConnectionFactory: ref.watch(rtcPeerConnectionFactoryProvider),
+    audioReceiver: ref.watch(audioReceiverServiceProvider),
+    iceServers: ref.watch(rtcIceServerConfigProvider),
+  );
+  ref.onDispose(service.dispose);
+  return service;
+});

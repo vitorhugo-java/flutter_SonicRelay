@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_colors.dart';
@@ -6,12 +7,16 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
+import '../domain/listener_connection_state.dart';
+import 'listener_view_model.dart';
 
-class ListenerPage extends StatelessWidget {
+class ListenerPage extends ConsumerWidget {
   const ListenerPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(listenerViewModelProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Audio monitor'),
@@ -32,30 +37,30 @@ class ListenerPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
                     child: ConnectionBadge(
-                      label: 'Preview disconnected',
-                      status: ConnectionStatus.disconnected,
+                      label: _badgeLabel(state.connection),
+                      status: _badgeStatus(state.connection),
                     ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  const SonicCard(child: _Visualizer()),
+                  SonicCard(child: _Visualizer(active: state.stats.hasRemoteAudio)),
                   const SizedBox(height: AppSpacing.md),
-                  const Row(
+                  Row(
                     children: [
                       Expanded(
                         child: _MetricCard(
-                          label: 'Latency',
-                          value: '-- ms',
-                          icon: Icons.speed_rounded,
+                          label: 'Audio',
+                          value: state.stats.hasRemoteAudio ? 'Live' : 'Silent',
+                          icon: Icons.graphic_eq_rounded,
                         ),
                       ),
-                      SizedBox(width: AppSpacing.md),
+                      const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: _MetricCard(
                           label: 'ICE state',
-                          value: 'Idle',
+                          value: state.stats.iceState,
                           icon: Icons.hub_outlined,
                         ),
                       ),
@@ -66,7 +71,10 @@ class ListenerPage extends StatelessWidget {
                     label: 'Leave session',
                     icon: Icons.logout_rounded,
                     isSecondary: true,
-                    onPressed: () => context.go('/join'),
+                    onPressed: () async {
+                      await ref.read(listenerViewModelProvider.notifier).leave();
+                      if (context.mounted) context.go('/join');
+                    },
                   ),
                 ],
               ),
@@ -76,10 +84,32 @@ class ListenerPage extends StatelessWidget {
       ),
     );
   }
+
+  String _badgeLabel(ListenerConnectionState state) => switch (state) {
+    ListenerConnectionState.idle => 'Not connected',
+    ListenerConnectionState.waitingForOffer => 'Waiting for publisher',
+    ListenerConnectionState.negotiating => 'Negotiating',
+    ListenerConnectionState.connecting => 'Connecting',
+    ListenerConnectionState.connected => 'Listening',
+    ListenerConnectionState.failed => 'Connection failed',
+    ListenerConnectionState.disconnected => 'Disconnected',
+  };
+
+  ConnectionStatus _badgeStatus(ListenerConnectionState state) => switch (state) {
+    ListenerConnectionState.connected => ConnectionStatus.connected,
+    ListenerConnectionState.waitingForOffer ||
+    ListenerConnectionState.negotiating ||
+    ListenerConnectionState.connecting => ConnectionStatus.connecting,
+    ListenerConnectionState.idle ||
+    ListenerConnectionState.failed ||
+    ListenerConnectionState.disconnected => ConnectionStatus.disconnected,
+  };
 }
 
 class _Visualizer extends StatelessWidget {
-  const _Visualizer();
+  const _Visualizer({required this.active});
+
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
@@ -90,32 +120,35 @@ class _Visualizer extends StatelessWidget {
         Text('Live signal', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: AppSpacing.sm),
         Text(
-          'Visualizer preview',
+          active ? 'Receiving remote audio' : 'Visualizer preview',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: AppSpacing.lg),
         ExcludeSemantics(
-          child: SizedBox(
-            height: 96,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (final height in heights)
-                  Expanded(
-                    child: Container(
-                      height: height,
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [AppColors.accent, Color(0xFF438BFF)],
+          child: Opacity(
+            opacity: active ? 1 : 0.4,
+            child: SizedBox(
+              height: 96,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (final height in heights)
+                    Expanded(
+                      child: Container(
+                        height: height,
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [AppColors.accent, Color(0xFF438BFF)],
+                          ),
+                          borderRadius: BorderRadius.circular(999),
                         ),
-                        borderRadius: BorderRadius.circular(999),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

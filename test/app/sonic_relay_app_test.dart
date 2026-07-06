@@ -61,7 +61,7 @@ void main() {
 
     await pumpPage(const ListenerPage());
     expect(find.text('Audio monitor'), findsOneWidget);
-    expect(find.text('Latency'), findsOneWidget);
+    expect(find.text('Audio'), findsOneWidget);
     expect(find.text('ICE state'), findsOneWidget);
 
     await pumpPage(const SettingsPage());
