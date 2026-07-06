@@ -15,9 +15,15 @@ enum ListenerConnectionState {
   /// Media path established; remote audio is playing.
   connected,
 
+  /// The media path dropped but may still recover (transient ICE loss).
+  reconnecting,
+
   /// Negotiation or the peer connection failed.
   failed,
 
-  /// The session ended or the viewer left.
+  /// The publisher ended the stream (terminal).
+  ended,
+
+  /// The viewer left or the connection closed cleanly.
   disconnected,
 }

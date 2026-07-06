@@ -62,7 +62,7 @@ void main() {
     await pumpPage(const ListenerPage());
     expect(find.text('Audio monitor'), findsOneWidget);
     expect(find.text('Audio'), findsOneWidget);
-    expect(find.text('ICE state'), findsOneWidget);
+    expect(find.text('WebRTC / ICE'), findsOneWidget);
 
     await pumpPage(const SettingsPage());
     expect(find.text('API environment'), findsOneWidget);

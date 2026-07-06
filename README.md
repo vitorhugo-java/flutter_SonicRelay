@@ -131,6 +131,33 @@ Responsibilities are split across the standard FDD boundaries:
 
 SDP and ICE candidate payload bodies are never logged anywhere in the receiver.
 
+## Listener screen states
+
+`ListenerPage` (`lib/features/listener/presentation`) is the viewer's audio monitor. It surfaces the full session lifecycle from a single Riverpod view model that combines the signaling socket status and the WebRTC connection state, and it exposes a leave action that closes signaling and disposes the peer connection.
+
+The screen shows, at a glance:
+
+- **Signaling status** — the WebSocket signaling connection (`Idle`, `Connecting`, `Connected`, `Reconnecting`, `Ended`, `Disconnected`).
+- **WebRTC / ICE status** — the peer-connection/ICE state label.
+- **Estimated latency (RTT)** and **jitter** — polled from the peer connection's stats roughly every two seconds while connected; each shows `—` until a value is available.
+- **Transport mode** — `Direct`, `Relay`, or `Unknown`, derived from the selected ICE candidate pair (relay on either side ⇒ relayed through TURN).
+
+`ListenerConnectionState` drives the headline badge and a contextual banner:
+
+| State | Meaning | UI |
+| --- | --- | --- |
+| `idle` | No signaling/peer activity yet | "Not connected" |
+| `waitingForOffer` | Signaling up; waiting for the publisher's offer | "Waiting for publisher" + waiting banner |
+| `negotiating` | Offer received, exchanging the answer | "Negotiating" |
+| `connecting` | ICE is establishing the media path | "Connecting" |
+| `connected` | Remote audio is playing | "Listening" + animated visualizer |
+| `reconnecting` | Media path dropped transiently, trying to recover | "Reconnecting" + reconnect banner |
+| `failed` | Negotiation or the peer connection failed | "Connection failed" + error banner |
+| `ended` | The publisher ended the stream (terminal) | "Session ended" + banner, "Back to sessions" action |
+| `disconnected` | The viewer left or the connection closed cleanly | "Disconnected" |
+
+The presentation layer is composed from small reusable widgets under `lib/features/listener/presentation/widgets`: `AudioVisualizer`, `IceStatePanel`, `LatencyCard`, and `ListenControlButton`. As everywhere else in the receiver, only coarse labels and metrics are surfaced — never SDP or ICE candidate bodies.
+
 ## UI preview
 
 The current app provides a dark Material 3 shell with reusable controls, connected token authentication, and a listener dashboard that reflects live WebRTC connection state.

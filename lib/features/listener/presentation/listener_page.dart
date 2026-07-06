@@ -5,10 +5,14 @@ import 'package:go_router/go_router.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/connection_badge.dart';
-import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
+import '../../signaling/data/signaling_client.dart';
 import '../domain/listener_connection_state.dart';
 import 'listener_view_model.dart';
+import 'widgets/audio_visualizer.dart';
+import 'widgets/ice_state_panel.dart';
+import 'widgets/latency_card.dart';
+import 'widgets/listen_control_button.dart';
 
 class ListenerPage extends ConsumerWidget {
   const ListenerPage({super.key});
@@ -16,6 +20,7 @@ class ListenerPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(listenerViewModelProvider);
+    final connection = state.connection;
 
     return Scaffold(
       appBar: AppBar(
@@ -40,39 +45,44 @@ class ListenerPage extends ConsumerWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: ConnectionBadge(
-                      label: _badgeLabel(state.connection),
-                      status: _badgeStatus(state.connection),
+                      label: _connectionLabel(connection),
+                      status: _connectionStatus(connection),
                     ),
                   ),
+                  if (_banner(connection) case final banner?) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _StateBanner(banner: banner),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
-                  SonicCard(child: _Visualizer(active: state.stats.hasRemoteAudio)),
+                  SonicCard(
+                    child: AudioVisualizer(active: state.stats.hasRemoteAudio),
+                  ),
                   const SizedBox(height: AppSpacing.md),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _MetricCard(
-                          label: 'Audio',
-                          value: state.stats.hasRemoteAudio ? 'Live' : 'Silent',
-                          icon: Icons.graphic_eq_rounded,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: _MetricCard(
-                          label: 'ICE state',
-                          value: state.stats.iceState,
-                          icon: Icons.hub_outlined,
-                        ),
-                      ),
-                    ],
+                  IceStatePanel(
+                    signalingLabel: _signalingLabel(state.signaling),
+                    signalingStatus: _signalingStatus(state.signaling),
+                    iceLabel: state.stats.iceState,
+                    iceStatus: _connectionStatus(connection),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  LatencyCard(
+                    rttMs: state.stats.rttMs,
+                    jitterMs: state.stats.jitterMs,
+                    transport: state.stats.transport,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _MetricCard(
+                    label: 'Audio',
+                    value: state.stats.hasRemoteAudio ? 'Live' : 'Silent',
+                    icon: Icons.graphic_eq_rounded,
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  SonicButton(
-                    label: 'Leave session',
-                    icon: Icons.logout_rounded,
-                    isSecondary: true,
-                    onPressed: () async {
-                      await ref.read(listenerViewModelProvider.notifier).leave();
+                  ListenControlButton(
+                    ended: connection == ListenerConnectionState.ended,
+                    onLeave: () async {
+                      await ref
+                          .read(listenerViewModelProvider.notifier)
+                          .leave();
                       if (context.mounted) context.go('/join');
                     },
                   ),
@@ -85,74 +95,115 @@ class ListenerPage extends ConsumerWidget {
     );
   }
 
-  String _badgeLabel(ListenerConnectionState state) => switch (state) {
+  String _connectionLabel(ListenerConnectionState state) => switch (state) {
     ListenerConnectionState.idle => 'Not connected',
     ListenerConnectionState.waitingForOffer => 'Waiting for publisher',
     ListenerConnectionState.negotiating => 'Negotiating',
     ListenerConnectionState.connecting => 'Connecting',
     ListenerConnectionState.connected => 'Listening',
+    ListenerConnectionState.reconnecting => 'Reconnecting',
     ListenerConnectionState.failed => 'Connection failed',
+    ListenerConnectionState.ended => 'Session ended',
     ListenerConnectionState.disconnected => 'Disconnected',
   };
 
-  ConnectionStatus _badgeStatus(ListenerConnectionState state) => switch (state) {
-    ListenerConnectionState.connected => ConnectionStatus.connected,
-    ListenerConnectionState.waitingForOffer ||
-    ListenerConnectionState.negotiating ||
-    ListenerConnectionState.connecting => ConnectionStatus.connecting,
-    ListenerConnectionState.idle ||
-    ListenerConnectionState.failed ||
-    ListenerConnectionState.disconnected => ConnectionStatus.disconnected,
+  ConnectionStatus _connectionStatus(ListenerConnectionState state) =>
+      switch (state) {
+        ListenerConnectionState.connected => ConnectionStatus.connected,
+        ListenerConnectionState.waitingForOffer ||
+        ListenerConnectionState.negotiating ||
+        ListenerConnectionState.connecting ||
+        ListenerConnectionState.reconnecting => ConnectionStatus.connecting,
+        ListenerConnectionState.idle ||
+        ListenerConnectionState.failed ||
+        ListenerConnectionState.ended ||
+        ListenerConnectionState.disconnected => ConnectionStatus.disconnected,
+      };
+
+  String _signalingLabel(SignalingConnectionState? state) => switch (state) {
+    null => 'Idle',
+    SignalingConnectionState.connecting => 'Connecting',
+    SignalingConnectionState.connected => 'Connected',
+    SignalingConnectionState.reconnecting => 'Reconnecting',
+    SignalingConnectionState.ended => 'Ended',
+    SignalingConnectionState.disconnected => 'Disconnected',
+  };
+
+  ConnectionStatus _signalingStatus(SignalingConnectionState? state) =>
+      switch (state) {
+        SignalingConnectionState.connected => ConnectionStatus.connected,
+        SignalingConnectionState.connecting ||
+        SignalingConnectionState.reconnecting => ConnectionStatus.connecting,
+        null ||
+        SignalingConnectionState.ended ||
+        SignalingConnectionState.disconnected => ConnectionStatus.disconnected,
+      };
+
+  _Banner? _banner(ListenerConnectionState state) => switch (state) {
+    ListenerConnectionState.waitingForOffer => const _Banner(
+      icon: Icons.hourglass_top_rounded,
+      color: AppColors.warning,
+      message: 'Waiting for the publisher to start streaming…',
+    ),
+    ListenerConnectionState.reconnecting => const _Banner(
+      icon: Icons.wifi_tethering_error_rounded,
+      color: AppColors.warning,
+      message: 'Connection dropped — trying to reconnect…',
+    ),
+    ListenerConnectionState.ended => const _Banner(
+      icon: Icons.stop_circle_outlined,
+      color: AppColors.textSecondary,
+      message: 'The publisher ended this session.',
+    ),
+    ListenerConnectionState.failed => const _Banner(
+      icon: Icons.error_outline_rounded,
+      color: AppColors.danger,
+      message: "Couldn't connect to the stream. Try rejoining.",
+    ),
+    _ => null,
   };
 }
 
-class _Visualizer extends StatelessWidget {
-  const _Visualizer({required this.active});
+class _Banner {
+  const _Banner({
+    required this.icon,
+    required this.color,
+    required this.message,
+  });
 
-  final bool active;
+  final IconData icon;
+  final Color color;
+  final String message;
+}
+
+class _StateBanner extends StatelessWidget {
+  const _StateBanner({required this.banner});
+
+  final _Banner banner;
 
   @override
   Widget build(BuildContext context) {
-    const heights = [30.0, 52.0, 76.0, 44.0, 88.0, 62.0, 36.0, 70.0, 48.0];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Live signal', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          active ? 'Receiving remote audio' : 'Visualizer preview',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        ExcludeSemantics(
-          child: Opacity(
-            opacity: active ? 1 : 0.4,
-            child: SizedBox(
-              height: 96,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  for (final height in heights)
-                    Expanded(
-                      child: Container(
-                        height: height,
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [AppColors.accent, Color(0xFF438BFF)],
-                          ),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                ],
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: banner.color.withValues(alpha: 0.10),
+        border: Border.all(color: banner.color.withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Row(
+          children: [
+            Icon(banner.icon, color: banner.color),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                banner.message,
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -172,13 +223,13 @@ class _MetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return SonicCard(
       padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
           Icon(icon, color: AppColors.accent),
-          const SizedBox(height: AppSpacing.md),
-          Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: AppSpacing.xs),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          ),
           Text(value, style: Theme.of(context).textTheme.titleLarge),
         ],
       ),

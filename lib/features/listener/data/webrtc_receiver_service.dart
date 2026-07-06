@@ -29,13 +29,17 @@ class WebRtcReceiverService {
     required RtcPeerConnectionFactory peerConnectionFactory,
     required AudioReceiverService audioReceiver,
     RtcIceServerConfig? iceServers,
+    Duration statsInterval = const Duration(seconds: 2),
   }) : _peerConnectionFactory = peerConnectionFactory,
        _audioReceiver = audioReceiver,
-       _iceServers = iceServers ?? RtcIceServerConfig.defaults();
+       _iceServers = iceServers ?? RtcIceServerConfig.defaults(),
+       _statsInterval = statsInterval;
 
   final RtcPeerConnectionFactory _peerConnectionFactory;
   final AudioReceiverService _audioReceiver;
   final RtcIceServerConfig _iceServers;
+  final Duration _statsInterval;
+  Timer? _statsTimer;
 
   final _connectionStateController =
       StreamController<ListenerConnectionState>.broadcast();
@@ -71,6 +75,7 @@ class WebRtcReceiverService {
       case SignalingMessageType.webrtcIceCandidate:
         await _handleRemoteCandidate(message);
       case SignalingMessageType.sessionEnded:
+        await _teardown(ListenerConnectionState.ended);
       case SignalingMessageType.sessionLeft:
         await _teardown(ListenerConnectionState.disconnected);
       default:
@@ -145,6 +150,7 @@ class WebRtcReceiverService {
   void _handleConnectionState(RtcConnectionState state) {
     switch (state) {
       case RtcConnectionState.connecting:
+        _stopStatsPolling();
         _setStats(_stats.copyWith(iceState: 'Connecting'));
         _setState(ListenerConnectionState.connecting);
       case RtcConnectionState.connected:
@@ -152,18 +158,50 @@ class WebRtcReceiverService {
           _stats.copyWith(iceState: 'Connected', connectedAt: DateTime.now()),
         );
         _setState(ListenerConnectionState.connected);
+        _startStatsPolling();
       case RtcConnectionState.disconnected:
-        _setStats(_stats.copyWith(iceState: 'Disconnected'));
-        _setState(ListenerConnectionState.disconnected);
+        // Transient ICE loss: keep the peer connection alive, it may recover.
+        _stopStatsPolling();
+        _setStats(_stats.copyWith(iceState: 'Reconnecting'));
+        _setState(ListenerConnectionState.reconnecting);
       case RtcConnectionState.failed:
+        _stopStatsPolling();
         _setStats(_stats.copyWith(iceState: 'Failed'));
         _setState(ListenerConnectionState.failed);
       case RtcConnectionState.closed:
+        _stopStatsPolling();
         _setStats(_stats.copyWith(iceState: 'Closed'));
         _setState(ListenerConnectionState.disconnected);
       case RtcConnectionState.idle:
         break;
     }
+  }
+
+  void _startStatsPolling() {
+    _statsTimer?.cancel();
+    _statsTimer = Timer.periodic(_statsInterval, (_) => refreshStats());
+  }
+
+  void _stopStatsPolling() {
+    _statsTimer?.cancel();
+    _statsTimer = null;
+  }
+
+  /// Polls the peer connection for coarse stats (RTT, jitter, transport mode)
+  /// and folds them into [statsValue]. Public so the periodic poll is testable
+  /// without a real timer.
+  Future<void> refreshStats() async {
+    final connection = _peerConnection;
+    if (connection == null) return;
+    final stats = await connection.getStats();
+    if (stats == null) return;
+    _setStats(
+      _stats.copyWith(
+        rttMs: stats.rttMs,
+        jitterMs: stats.jitterMs,
+        transport: stats.transport,
+      ),
+    );
   }
 
   void _emit(
@@ -199,10 +237,17 @@ class WebRtcReceiverService {
   }
 
   Future<void> _teardown(ListenerConnectionState finalState) async {
+    _stopStatsPolling();
     await _disposePeerConnection();
     _pendingRemoteCandidates.clear();
     await _audioReceiver.stop();
-    _setStats(_stats.copyWith(hasRemoteAudio: false, clearConnectedAt: true));
+    _setStats(
+      _stats.copyWith(
+        hasRemoteAudio: false,
+        clearConnectedAt: true,
+        clearMetrics: true,
+      ),
+    );
     _setState(finalState);
   }
 
@@ -212,6 +257,7 @@ class WebRtcReceiverService {
 
   /// Tears down the peer connection and audio and releases all streams.
   Future<void> dispose() async {
+    _stopStatsPolling();
     await _disposePeerConnection();
     await _audioReceiver.stop();
     await _connectionStateController.close();

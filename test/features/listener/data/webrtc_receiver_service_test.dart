@@ -22,6 +22,10 @@ class FakeRtcPeerConnection implements RtcPeerConnection {
   RtcSessionDescription? localDescription;
   final List<RtcIceCandidate> addedCandidates = [];
   bool disposed = false;
+  RtcConnectionStats? nextStats;
+
+  @override
+  Future<RtcConnectionStats?> getStats() async => nextStats;
 
   void Function(RtcIceCandidate candidate)? _onIceCandidate;
   void Function(RtcMediaStream stream)? _onRemoteStream;
@@ -263,7 +267,66 @@ void main() {
 
     expect(connection.disposed, isTrue);
     expect(audio.stopCount, greaterThanOrEqualTo(1));
-    expect(states.last, ListenerConnectionState.disconnected);
+    expect(states.last, ListenerConnectionState.ended);
+  });
+
+  test('a transient WebRTC disconnect maps to reconnecting', () async {
+    final states = <ListenerConnectionState>[];
+    service.connectionState.listen(states.add);
+
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    factory.created.single.fireConnectionState(
+      RtcConnectionState.disconnected,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(states, contains(ListenerConnectionState.reconnecting));
+    expect(service.statsValue.iceState, 'Reconnecting');
+  });
+
+  test('refreshStats folds RTT/jitter/transport into the stats', () async {
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    factory.created.single.nextStats = const RtcConnectionStats(
+      rttMs: 42,
+      jitterMs: 7,
+      transport: RtcTransportMode.relay,
+    );
+
+    await service.refreshStats();
+
+    expect(service.statsValue.rttMs, 42);
+    expect(service.statsValue.jitterMs, 7);
+    expect(service.statsValue.transport, RtcTransportMode.relay);
+  });
+
+  test('leave disposes the peer connection, stops audio, and clears metrics', () async {
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    final connection = factory.created.single;
+    connection.nextStats = const RtcConnectionStats(rttMs: 42);
+    await service.refreshStats();
+
+    await service.leave();
+
+    expect(connection.disposed, isTrue);
+    expect(audio.stopCount, greaterThanOrEqualTo(1));
+    expect(service.connectionStateValue, ListenerConnectionState.disconnected);
+    expect(service.statsValue.rttMs, isNull);
+    expect(service.statsValue.transport, RtcTransportMode.unknown);
   });
 
   test('a second offer renegotiates by disposing the previous connection', () async {

@@ -76,6 +76,37 @@ enum RtcConnectionState {
   closed,
 }
 
+/// How media is reaching the viewer, derived from the selected ICE candidate
+/// pair.
+enum RtcTransportMode {
+  /// Peer-to-peer (host/srflx/prflx candidates).
+  direct,
+
+  /// Relayed through a TURN server.
+  relay,
+
+  /// Not yet known (no selected pair / stats unavailable).
+  unknown,
+}
+
+/// Coarse, display-only connection statistics polled from the peer connection.
+/// Carries only numbers and a transport label — never SDP or candidate bodies.
+class RtcConnectionStats {
+  const RtcConnectionStats({
+    this.rttMs,
+    this.jitterMs,
+    this.transport = RtcTransportMode.unknown,
+  });
+
+  /// Estimated round-trip time in milliseconds, when available.
+  final double? rttMs;
+
+  /// Inbound audio jitter in milliseconds, when available.
+  final double? jitterMs;
+
+  final RtcTransportMode transport;
+}
+
 /// A handle over a remote media stream. The viewer only ever consumes audio.
 abstract class RtcMediaStream {
   String get id;
@@ -93,6 +124,10 @@ abstract class RtcPeerConnection {
   Future<void> setLocalDescription(RtcSessionDescription description);
 
   Future<void> addIceCandidate(RtcIceCandidate candidate);
+
+  /// Polls coarse connection statistics (RTT, jitter, transport mode). Returns
+  /// `null` when nothing usable is available.
+  Future<RtcConnectionStats?> getStats();
 
   set onIceCandidate(void Function(RtcIceCandidate candidate)? callback);
 
@@ -217,6 +252,70 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
         candidate.sdpMLineIndex,
       ),
     );
+  }
+
+  @override
+  Future<RtcConnectionStats?> getStats() async {
+    try {
+      final reports = await _connection.getStats();
+      Map<Object?, Object?>? selectedPair;
+      final candidates = <String, Map<Object?, Object?>>{};
+      double? jitterMs;
+
+      for (final report in reports) {
+        final values = Map<Object?, Object?>.from(report.values);
+        switch (report.type) {
+          case 'candidate-pair':
+            final nominated = values['nominated'] == true;
+            final succeeded = values['state'] == 'succeeded';
+            if (nominated || (succeeded && selectedPair == null)) {
+              selectedPair = values;
+            }
+          case 'local-candidate':
+          case 'remote-candidate':
+            candidates[report.id] = values;
+          case 'inbound-rtp':
+            final isAudio =
+                values['kind'] == 'audio' || values['mediaType'] == 'audio';
+            final jitter = values['jitter'];
+            if (isAudio && jitter is num) {
+              jitterMs = jitter.toDouble() * 1000;
+            }
+        }
+      }
+
+      double? rttMs;
+      var transport = RtcTransportMode.unknown;
+      if (selectedPair != null) {
+        final rtt =
+            selectedPair['currentRoundTripTime'] ??
+            selectedPair['roundTripTime'];
+        if (rtt is num) rttMs = rtt.toDouble() * 1000;
+
+        final localType =
+            candidates[selectedPair['localCandidateId']]?['candidateType'];
+        final remoteType =
+            candidates[selectedPair['remoteCandidateId']]?['candidateType'];
+        if (localType == 'relay' || remoteType == 'relay') {
+          transport = RtcTransportMode.relay;
+        } else if (localType != null || remoteType != null) {
+          transport = RtcTransportMode.direct;
+        }
+      }
+
+      if (rttMs == null &&
+          jitterMs == null &&
+          transport == RtcTransportMode.unknown) {
+        return null;
+      }
+      return RtcConnectionStats(
+        rttMs: rttMs,
+        jitterMs: jitterMs,
+        transport: transport,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

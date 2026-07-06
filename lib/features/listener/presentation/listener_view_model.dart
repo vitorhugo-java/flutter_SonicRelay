@@ -13,18 +13,24 @@ class ListenerState {
   const ListenerState({
     this.connection = ListenerConnectionState.idle,
     this.stats = const ListenerStats.initial(),
+    this.signaling,
   });
 
   final ListenerConnectionState connection;
   final ListenerStats stats;
 
+  /// Signaling socket status, or `null` before the socket reports anything.
+  final SignalingConnectionState? signaling;
+
   ListenerState copyWith({
     ListenerConnectionState? connection,
     ListenerStats? stats,
+    SignalingConnectionState? signaling,
   }) {
     return ListenerState(
       connection: connection ?? this.connection,
       stats: stats ?? this.stats,
+      signaling: signaling ?? this.signaling,
     );
   }
 }
@@ -42,6 +48,7 @@ class ListenerViewModel extends Notifier<ListenerState> {
   StreamSubscription<OutboundSignal>? _outboundSubscription;
   StreamSubscription<ListenerConnectionState>? _connectionSubscription;
   StreamSubscription<ListenerStats>? _statsSubscription;
+  StreamSubscription<SignalingConnectionState>? _signalingStateSubscription;
 
   @override
   ListenerState build() {
@@ -58,12 +65,16 @@ class ListenerViewModel extends Notifier<ListenerState> {
     _statsSubscription = _receiver.stats.listen((stats) {
       state = state.copyWith(stats: stats);
     });
+    _signalingStateSubscription = _signaling.connectionState.listen((signaling) {
+      state = state.copyWith(signaling: signaling);
+    });
 
     ref.onDispose(() {
       _messageSubscription?.cancel();
       _outboundSubscription?.cancel();
       _connectionSubscription?.cancel();
       _statsSubscription?.cancel();
+      _signalingStateSubscription?.cancel();
     });
 
     return ListenerState(
