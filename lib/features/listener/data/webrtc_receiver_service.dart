@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../../core/diagnostics/sonic_log.dart';
 import '../../../core/webrtc/rtc_ice_server_config.dart';
 import '../../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../signaling/domain/signaling_message.dart';
@@ -74,6 +75,7 @@ class WebRtcReceiverService {
         // authenticated `from` and reply `viewer.ready` to it so the publisher
         // creates its peer connection and sends the offer. `viewer.ready` is a
         // routed message and the backend rejects it without a `to` recipient.
+        sonicLog('WebRTC', 'publisher.ready from=${message.from} -> viewer.ready');
         _publisherId = message.from;
         _emit(SignalingMessageType.viewerReady, const {}, to: message.from);
         if (_state == ListenerConnectionState.idle) {
@@ -94,6 +96,7 @@ class WebRtcReceiverService {
 
   Future<void> _handleOffer(SignalingMessage message) async {
     _publisherId = message.from;
+    sonicLog('WebRTC', 'offer received from=${message.from} -> negotiating');
     try {
       // Renegotiate cleanly if an offer arrives while a connection exists.
       await _disposePeerConnection();
@@ -113,12 +116,14 @@ class WebRtcReceiverService {
       final answer = await connection.createAnswer();
       await connection.setLocalDescription(answer);
 
+      sonicLog('WebRTC', 'answer created -> sending to=$_publisherId');
       _emit(
         SignalingMessageType.webrtcAnswer,
         answer.toSignalingPayload(),
         to: _publisherId,
       );
-    } catch (_) {
+    } catch (error, stack) {
+      sonicLog('WebRTC', 'offer handling failed: $error\n$stack');
       await _teardown(ListenerConnectionState.failed);
     }
   }
@@ -152,11 +157,13 @@ class WebRtcReceiverService {
   }
 
   Future<void> _handleRemoteStream(RtcMediaStream stream) async {
+    sonicLog('WebRTC', 'remote audio stream received -> playing');
     await _audioReceiver.play(stream);
     _setStats(_stats.copyWith(hasRemoteAudio: true));
   }
 
   void _handleConnectionState(RtcConnectionState state) {
+    sonicLog('WebRTC', 'peer connection state -> $state');
     switch (state) {
       case RtcConnectionState.connecting:
         _stopStatsPolling();

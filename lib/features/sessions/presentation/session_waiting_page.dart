@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/di/app_providers.dart';
 import '../../../app/theme/app_spacing.dart';
+import '../../../core/diagnostics/sonic_log.dart';
 import '../../../core/widgets/connection_badge.dart';
 import '../../../core/widgets/sonic_button.dart';
 import '../../../core/widgets/sonic_card.dart';
@@ -37,7 +38,12 @@ class _SessionWaitingPageState extends ConsumerState<SessionWaitingPage> {
     final deviceId = await ref
         .read(devicesRepositoryProvider)
         .readCurrentDeviceId();
+    sonicLog(
+      'Waiting',
+      'start sessionId=${session.sessionId} deviceId=$deviceId',
+    );
     if (deviceId == null || deviceId.isEmpty) {
+      sonicLog('Waiting', 'no device id -> cannot connect');
       if (mounted) {
         setState(
           () => _error =
@@ -53,7 +59,8 @@ class _SessionWaitingPageState extends ConsumerState<SessionWaitingPage> {
       await ref
           .read(listenerViewModelProvider.notifier)
           .connect(session: session, deviceId: deviceId);
-    } catch (_) {
+    } catch (error) {
+      sonicLog('Waiting', 'connect failed: $error');
       if (mounted) {
         setState(
           () => _error = 'Unable to connect to the session stream. Try again.',
@@ -62,6 +69,7 @@ class _SessionWaitingPageState extends ConsumerState<SessionWaitingPage> {
       return;
     }
 
+    sonicLog('Waiting', 'signaling opened -> navigating to /listener');
     if (mounted) context.go('/listener');
   }
 

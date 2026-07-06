@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import '../../../core/diagnostics/sonic_log.dart';
 import '../../../core/storage/secure_token_storage.dart';
 import '../../../core/websocket/websocket_client.dart';
 import '../../../core/websocket/websocket_message.dart';
@@ -78,6 +79,11 @@ class SignalingClient {
     };
 
     final uri = _buildUri(session.signalingUrl, session.sessionId, deviceId);
+    sonicLog(
+      'Signaling',
+      'connect sessionId=${session.sessionId} deviceId=$deviceId '
+          'hasToken=${authSession != null} uri=$uri',
+    );
     await _webSocketClient.connect(uri, headers: headers);
   }
 
@@ -103,6 +109,11 @@ class SignalingClient {
 
   void _handleRawMessage(WebSocketMessage raw) {
     final message = _mapper.fromWebSocketMessage(raw);
+    sonicLog(
+      'Signaling',
+      'recv type=${message.type.wireValue} from=${message.from} '
+          'to=${message.to}',
+    );
     _messageController.add(message);
 
     switch (message.type) {
@@ -129,6 +140,7 @@ class SignalingClient {
   void _send(SignalingMessageType type, Map<String, Object?> payload, {String? to}) {
     final session = _session;
     if (session == null) return;
+    sonicLog('Signaling', 'send type=${type.wireValue} to=$to');
     final message = SignalingMessage(
       type: type,
       messageId: _generateMessageId(),
@@ -156,6 +168,7 @@ class SignalingClient {
   /// Closes the socket and stops reconnect attempts. Call when the viewer
   /// leaves the session or the server signals it has ended.
   Future<void> leave() async {
+    sonicLog('Signaling', 'leave sessionId=${_session?.sessionId}');
     _leaving = true;
     await _webSocketClient.disconnect();
   }

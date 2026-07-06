@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../diagnostics/sonic_log.dart';
 import 'websocket_message.dart';
 
 enum WebSocketConnectionState {
@@ -121,6 +122,7 @@ class WebSocketClient {
       _stateController.add(WebSocketConnectionState.connecting);
     }
     try {
+      sonicLog('WebSocket', 'connecting to $_uri (attempt $_attempt)');
       final connection = await _connector(_uri!, _headers);
       if (_stopped) {
         await connection.close();
@@ -128,6 +130,7 @@ class WebSocketClient {
       }
       _connection = connection;
       _attempt = 0;
+      sonicLog('WebSocket', 'connected to $_uri');
       _stateController.add(WebSocketConnectionState.connected);
       _subscription = connection.stream.listen(
         (dynamic data) {
@@ -135,11 +138,18 @@ class WebSocketClient {
             _messageController.add(WebSocketMessage.decode(data));
           }
         },
-        onDone: _handleDisconnect,
-        onError: (Object _) => _handleDisconnect(),
+        onDone: () {
+          sonicLog('WebSocket', 'socket closed by peer');
+          _handleDisconnect();
+        },
+        onError: (Object error) {
+          sonicLog('WebSocket', 'socket error: $error');
+          _handleDisconnect();
+        },
         cancelOnError: true,
       );
-    } catch (_) {
+    } catch (error) {
+      sonicLog('WebSocket', 'connect failed: $error');
       _scheduleReconnect();
     }
   }
