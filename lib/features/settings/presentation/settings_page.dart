@@ -135,13 +135,11 @@ class _SettingsRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -158,7 +156,6 @@ class _SettingsRow extends StatelessWidget {
             ],
           ),
         ),
-        ?trailing,
       ],
     );
   }

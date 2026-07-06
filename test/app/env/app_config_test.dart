@@ -10,9 +10,11 @@ void main() {
 
       expect(config.apiBaseUrl, 'https://sonicRelay-api.hugodotnet.dev');
       expect(config.webSocketBaseUrl, 'wss://sonicRelay-api.hugodotnet.dev');
+      // signalingUri is built via Uri.parse, which normalizes the host to
+      // lowercase (harmless: DNS hostnames are case-insensitive).
       expect(
         config.signalingUri.toString(),
-        'wss://sonicRelay-api.hugodotnet.dev/ws/signaling',
+        'wss://sonicrelay-api.hugodotnet.dev/ws/signaling',
       );
     });
 
