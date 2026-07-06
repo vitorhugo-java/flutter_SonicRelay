@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for the app to reach the SonicRelay API/WebSocket in release
+         builds. Debug/profile manifests declare this separately for tooling. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="sonic_relay"
         android:name="${applicationName}"
