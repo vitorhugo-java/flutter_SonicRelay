@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
 import '../../core/storage/secure_token_storage.dart';
+import '../../core/websocket/websocket_client.dart';
 import '../../features/auth/data/auth_api.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/devices/data/device_id_storage.dart';
@@ -14,6 +15,7 @@ import '../../features/devices/data/devices_api.dart';
 import '../../features/devices/data/devices_repository.dart';
 import '../../features/sessions/data/sessions_api.dart';
 import '../../features/sessions/data/sessions_repository.dart';
+import '../../features/signaling/data/signaling_client.dart';
 import '../env/app_config.dart';
 
 final appConfigProvider = Provider<AppConfig>(
@@ -82,4 +84,15 @@ final sessionsRepositoryProvider = Provider<SessionsRepository>(
 
 final devicePlatformProvider = Provider<String>(
   (ref) => Platform.operatingSystem,
+);
+
+final webSocketClientProvider = Provider<WebSocketClient>(
+  (ref) => WebSocketClient(connector: ioWebSocketConnector),
+);
+
+final signalingClientProvider = Provider<SignalingClient>(
+  (ref) => SignalingClient(
+    webSocketClient: ref.watch(webSocketClientProvider),
+    tokenStorage: ref.watch(tokenStorageProvider),
+  ),
 );

@@ -79,6 +79,38 @@ GET  /api/devices
 GET  /api/devices/{deviceId}
 ```
 
+## WebSocket signaling contract
+
+After a successful `POST /api/sessions/join`, the viewer opens an authenticated WebSocket connection to the returned `signalingUrl`, with `sessionId` and the viewer's `deviceId` appended as query parameters and the current access token sent as a bearer header:
+
+```text
+GET /ws/signaling?sessionId={sessionId}&deviceId={deviceId}
+Authorization: Bearer <access_token>
+```
+
+Every frame is a typed JSON envelope:
+
+```json
+{
+  "type": "webrtc.offer",
+  "messageId": "uuid",
+  "sessionId": "session_uuid",
+  "from": "participant_uuid",
+  "to": "participant_uuid",
+  "timestamp": "2026-07-03T14:00:00-03:00",
+  "payload": {}
+}
+```
+
+Supported `type` values: `session.joined`, `session.left`, `publisher.ready`, `viewer.ready`, `webrtc.offer`, `webrtc.answer`, `webrtc.ice_candidate`, `session.ended`, `error`, `ping`, `pong`. Unrecognized values are mapped to an `unknown` type and still routed to listeners instead of being dropped, so the transport tolerates future message types.
+
+Transport (`lib/core/websocket`) and signaling (`lib/features/signaling`) are split by responsibility:
+
+- `WebSocketClient` is a reusable, reconnecting JSON-over-WebSocket transport with exponential backoff. It carries no knowledge of the signaling schema.
+- `SignalingClient` builds the authenticated connection URL from the joined session context, sends `viewer.ready` once the socket opens, replies to `ping` with `pong`, maps every frame through `SignalingMessageMapper` into a typed `SignalingMessage`, and closes the socket (without reconnecting) when it receives `session.ended` or the viewer explicitly leaves.
+
+This issue implements signaling transport and routing only; no WebRTC peer connection or media handling is introduced here. SDP and ICE candidate payloads are never logged.
+
 ## UI preview
 
 The current app provides a dark Material 3 shell with reusable controls and connected token authentication. Session discovery and WebRTC audio are not connected yet.
