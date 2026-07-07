@@ -8,6 +8,8 @@ import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
 import '../../core/storage/secure_token_storage.dart';
 import '../../core/storage/server_config_storage.dart';
+import '../../core/webrtc/ice_servers_api.dart';
+import '../../core/webrtc/ice_servers_repository.dart';
 import '../../core/webrtc/rtc_ice_server_config.dart';
 import '../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../core/websocket/websocket_client.dart';
@@ -139,6 +141,14 @@ final rtcIceServerConfigProvider = Provider<RtcIceServerConfig>(
   (ref) => RtcIceServerConfig.defaults(),
 );
 
+final iceServersApiProvider = Provider<IceServersApi>(
+  (ref) => DioIceServersApi(ref.watch(dioProvider)),
+);
+
+final iceServersRepositoryProvider = Provider<IceServersRepository>(
+  (ref) => IceServersRepository(api: ref.watch(iceServersApiProvider)),
+);
+
 final rtcPeerConnectionFactoryProvider = Provider<RtcPeerConnectionFactory>(
   (ref) => const FlutterWebRtcPeerConnectionFactory(),
 );
@@ -152,6 +162,7 @@ final webRtcReceiverServiceProvider = Provider<WebRtcReceiverService>((ref) {
     peerConnectionFactory: ref.watch(rtcPeerConnectionFactoryProvider),
     audioReceiver: ref.watch(audioReceiverServiceProvider),
     iceServers: ref.watch(rtcIceServerConfigProvider),
+    iceServersResolver: ref.watch(iceServersRepositoryProvider).resolve,
   );
   ref.onDispose(service.dispose);
   return service;

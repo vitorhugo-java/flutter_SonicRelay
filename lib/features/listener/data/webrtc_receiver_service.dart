@@ -30,15 +30,23 @@ class WebRtcReceiverService {
     required RtcPeerConnectionFactory peerConnectionFactory,
     required AudioReceiverService audioReceiver,
     RtcIceServerConfig? iceServers,
+    Future<RtcIceServerConfig> Function()? iceServersResolver,
     Duration statsInterval = const Duration(seconds: 2),
   }) : _peerConnectionFactory = peerConnectionFactory,
        _audioReceiver = audioReceiver,
        _iceServers = iceServers ?? RtcIceServerConfig.defaults(),
+       _iceServersResolver = iceServersResolver,
        _statsInterval = statsInterval;
 
   final RtcPeerConnectionFactory _peerConnectionFactory;
   final AudioReceiverService _audioReceiver;
   final RtcIceServerConfig _iceServers;
+
+  /// Optional resolver used to fetch fresh ICE servers (including short-lived
+  /// TURN credentials) at negotiation time. Falls back to [_iceServers] when
+  /// absent. Must never throw — the repository swallows failures into a
+  /// fallback config.
+  final Future<RtcIceServerConfig> Function()? _iceServersResolver;
   final Duration _statsInterval;
   Timer? _statsTimer;
 
@@ -112,7 +120,12 @@ class WebRtcReceiverService {
       await _disposePeerConnection();
       _setState(ListenerConnectionState.negotiating);
 
-      final connection = await _peerConnectionFactory.create(_iceServers);
+      // Resolve ICE servers (with fresh TURN credentials) per negotiation; the
+      // resolver never throws, falling back to the static config on failure.
+      final iceServers = _iceServersResolver != null
+          ? await _iceServersResolver()
+          : _iceServers;
+      final connection = await _peerConnectionFactory.create(iceServers);
       _peerConnection = connection;
       connection.onIceCandidate = _handleLocalCandidate;
       connection.onRemoteStream = _handleRemoteStream;
