@@ -62,6 +62,10 @@ class ListenerViewModel extends Notifier<ListenerState> {
     });
     _connectionSubscription = _receiver.connectionState.listen((connection) {
       state = state.copyWith(connection: connection);
+      // Drive the background foreground-service decision from the same states.
+      ref
+          .read(streamLifecycleControllerProvider)
+          .onConnectionState(connection);
     });
     _statsSubscription = _receiver.stats.listen((stats) {
       state = state.copyWith(stats: stats);
@@ -92,6 +96,10 @@ class ListenerViewModel extends Notifier<ListenerState> {
     required StreamSession session,
     required String deviceId,
   }) => _signaling.connect(session: session, deviceId: deviceId);
+
+  /// Nudges a stalled connection to recover by re-announcing readiness to the
+  /// publisher (invoked from the background notification's "Reconnect" action).
+  Future<void> reconnect() => _receiver.reconnect();
 
   /// Leaves the session: tears down the peer connection/audio and closes the
   /// signaling socket.

@@ -6,9 +6,13 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
+import '../../core/storage/background_playback_storage.dart';
 import '../../core/storage/relay_mode_storage.dart';
 import '../../core/storage/secure_token_storage.dart';
 import '../../core/storage/server_config_storage.dart';
+import '../../features/background/data/foreground_stream_service.dart';
+import '../../features/background/presentation/stream_lifecycle_controller.dart';
+import '../../features/listener/presentation/listener_view_model.dart';
 import '../../core/webrtc/ice_servers_api.dart';
 import '../../core/webrtc/ice_servers_repository.dart';
 import '../../core/webrtc/rtc_ice_server_config.dart';
@@ -192,4 +196,57 @@ final webRtcReceiverServiceProvider = Provider<WebRtcReceiverService>((ref) {
   );
   ref.onDispose(service.dispose);
   return service;
+});
+
+final backgroundPlaybackStorageProvider = Provider<BackgroundPlaybackStorage>(
+  (ref) => BackgroundPlaybackStorage(ref.watch(secureStorageProvider)),
+);
+
+/// Whether the viewer keeps audio playing (via the Android foreground service)
+/// while the app is backgrounded during an active stream. Persisted; on by
+/// default. Seeded at startup by an override in `main()`.
+final backgroundPlaybackEnabledProvider =
+    NotifierProvider<BackgroundPlaybackNotifier, bool>(
+      BackgroundPlaybackNotifier.new,
+    );
+
+class BackgroundPlaybackNotifier extends Notifier<bool> {
+  BackgroundPlaybackNotifier([this._initial = true]);
+
+  final bool _initial;
+
+  @override
+  bool build() => _initial;
+
+  Future<void> set(bool value) async {
+    await ref.read(backgroundPlaybackStorageProvider).write(value);
+    state = value;
+  }
+}
+
+/// The platform foreground service: a real `mediaPlayback` service on Android,
+/// a no-op everywhere else (and in tests).
+final foregroundStreamServiceProvider = Provider<ForegroundStreamService>((ref) {
+  final service = Platform.isAndroid
+      ? AndroidForegroundStreamServiceBridge()
+      : NoopForegroundStreamService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+/// Decides when the foreground service runs. Callbacks are read lazily so this
+/// provider never builds the listener view model (avoiding a dependency cycle).
+final streamLifecycleControllerProvider = Provider<StreamLifecycleController>((
+  ref,
+) {
+  final controller = StreamLifecycleController(
+    service: ref.watch(foregroundStreamServiceProvider),
+    keepPlayingInBackground: () => ref.read(backgroundPlaybackEnabledProvider),
+    onStopRequested: () =>
+        ref.read(listenerViewModelProvider.notifier).leave(),
+    onReconnectRequested: () =>
+        ref.read(listenerViewModelProvider.notifier).reconnect(),
+  );
+  ref.onDispose(controller.dispose);
+  return controller;
 });

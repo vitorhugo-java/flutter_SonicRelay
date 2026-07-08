@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/di/app_providers.dart';
@@ -63,11 +65,13 @@ class AuthViewModel extends Notifier<AuthState> {
   }
 
   Future<void> logout() async {
+    await ref.read(streamLifecycleControllerProvider).forceStop();
     await _repository.logout();
     state = const AuthState.unauthenticated();
   }
 
   void expireSession() {
+    unawaited(ref.read(streamLifecycleControllerProvider).forceStop());
     state = const AuthState.unauthenticated(
       errorMessage: 'Your session has expired. Please sign in again.',
     );

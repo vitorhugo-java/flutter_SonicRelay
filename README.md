@@ -185,6 +185,27 @@ The screen shows, at a glance:
 
 The presentation layer is composed from small reusable widgets under `lib/features/listener/presentation/widgets`: `AudioVisualizer`, `IceStatePanel`, `LatencyCard`, and `ListenControlButton`. As everywhere else in the receiver, only coarse labels and metrics are surfaced — never SDP or ICE candidate bodies.
 
+## Background playback (Android)
+
+While a stream is active, SonicRelay keeps receiving and playing audio when the app is backgrounded or the screen is locked, using an Android **`mediaPlayback` foreground service** with a persistent notification (issue #13). The WebRTC receiver and signaling client are provider-owned and already outlive the widget tree, so the connection survives the UI being paused; the foreground service adds the process-survival layer Android requires.
+
+- **Feature slice** `lib/features/background`:
+  - `ForegroundStreamService` — abstraction over the native service. `AndroidForegroundStreamServiceBridge` talks to the Kotlin `SonicRelayForegroundService` over the `sonicrelay/foreground` method channel and receives notification-button taps (`open`/`stop`/`reconnect`) over the `sonicrelay/foreground/events` event channel. Every other platform uses `NoopForegroundStreamService`.
+  - `StreamLifecycleController` — the pure, unit-tested decision core. It starts the service when the app is backgrounded during an active stream (and the setting is on), updates the notification as the connection state changes, stops it on return to foreground / stream end / logout, and enforces a **bounded** background reconnect window (default 45s) after which it stops the service and shows a "stream ended" notice.
+- **Notification actions:** Open (focus the app), Stop (leave the session), and Reconnect (while reconnecting).
+- **Setting:** `Settings → Playback → Keep audio playing in background` (persisted, on by default). It only has any effect while a stream the user started is active.
+- **Manifest:** declares the `mediaPlayback` service and the `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, and `POST_NOTIFICATIONS` permissions. The service is never started from `BOOT_COMPLETED`. No token/session data is ever placed in notifications, intents, logs, or plain storage.
+
+### Manual QA (Android 13/14/15)
+
+1. Join a stream, lock the phone → audio continues; a persistent notification is shown.
+2. Switch to another app → audio continues.
+3. Notification **Open** → returns to the live session with the correct state.
+4. Notification **Stop** → leaves the session and the service stops.
+5. Drop Wi-Fi briefly → "reconnecting" notification; restore → recovers. Leave it off past the window → service stops with a "stream ended" notice.
+6. Log out while streaming → the service stops.
+7. Android 14/15: no `MissingForegroundServiceTypeException` / `SecurityException`.
+
 ## UI preview
 
 The current app provides a dark Material 3 shell with reusable controls, connected token authentication, and a listener dashboard that reflects live WebRTC connection state.

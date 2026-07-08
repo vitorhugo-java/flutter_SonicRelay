@@ -299,6 +299,16 @@ class WebRtcReceiverService {
     _setState(finalState);
   }
 
+  /// Re-announces `viewer.ready` to the known publisher so it re-offers, nudging
+  /// a stalled connection to recover. Used by the background notification's
+  /// "Reconnect" action. No-op if no publisher has been seen yet.
+  Future<void> reconnect() async {
+    final publisher = _publisherId;
+    if (publisher == null) return;
+    sonicLog('WebRTC', 'manual reconnect -> viewer.ready to=$publisher');
+    _emit(SignalingMessageType.viewerReady, const {}, to: publisher);
+  }
+
   /// Tears down the active peer connection and audio when the viewer leaves,
   /// keeping the service reusable for a later session.
   Future<void> leave() => _teardown(ListenerConnectionState.disconnected);

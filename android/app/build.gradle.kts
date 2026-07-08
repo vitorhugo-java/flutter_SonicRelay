@@ -42,3 +42,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // NotificationCompat / ContextCompat used by the background foreground service.
+    implementation("androidx.core:core-ktx:1.13.1")
+}

@@ -8,6 +8,7 @@ import '../../../core/widgets/sonic_card.dart';
 import '../../auth/presentation/login_view_model.dart';
 import '../../devices/presentation/devices_view_model.dart';
 import '../../devices/presentation/widgets/device_card.dart';
+import 'widgets/keep_playing_toggle.dart';
 import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
 
@@ -57,6 +58,14 @@ class SettingsPage extends ConsumerWidget {
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         const RelayModeToggle(),
+                        const Divider(height: AppSpacing.xl),
+                        const _SettingsRow(
+                          icon: Icons.headset_outlined,
+                          title: 'Playback',
+                          subtitle: 'Background audio',
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        const KeepPlayingToggle(),
                         const Divider(height: AppSpacing.xl),
                         const _SettingsRow(
                           icon: Icons.dark_mode_outlined,

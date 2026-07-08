@@ -8,6 +8,13 @@
          whole process (SIGABRT in jvm.cc) rather than surfacing as a Dart error. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <!-- Keep the viewer alive while backgrounded during an active stream via a
+         mediaPlayback foreground service (issue #13). Android 14+ requires both
+         the base and the type-specific permission. POST_NOTIFICATIONS (13+) is
+         needed for the persistent notification the service must display. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="sonic_relay"
         android:name="${applicationName}"
@@ -34,6 +41,14 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Foreground service that keeps audio playing while backgrounded during
+             an active stream. mediaPlayback is the correct type for receiving and
+             playing SonicRelay audio. Not exported and never started from
+             BOOT_COMPLETED — the user starts/joins a stream intentionally. -->
+        <service
+            android:name=".background.SonicRelayForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
