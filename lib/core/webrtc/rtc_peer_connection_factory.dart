@@ -58,6 +58,16 @@ class RtcIceCandidate {
   final String? sdpMid;
   final int? sdpMLineIndex;
 
+  /// The `sdpMid` value that is safe to hand to the native WebRTC layer.
+  ///
+  /// Android's libwebrtc aborts the whole process (SIGABRT in `jvm.cc`, via
+  /// `JniHelper.getStringBytes` on a null String) when `addIceCandidate`
+  /// receives a null `sdpMid`. Publishers legitimately send candidates without
+  /// a mid (routed purely by [sdpMLineIndex]), so callers crossing the native
+  /// boundary must use this coalesced value; libwebrtc then routes by line
+  /// index.
+  String get nativeSafeSdpMid => sdpMid ?? '';
+
   Map<String, Object?> toSignalingPayload() => {
     'candidate': candidate,
     'sdpMid': sdpMid,
@@ -248,7 +258,7 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
     return _connection.addCandidate(
       webrtc.RTCIceCandidate(
         candidate.candidate,
-        candidate.sdpMid,
+        candidate.nativeSafeSdpMid,
         candidate.sdpMLineIndex,
       ),
     );

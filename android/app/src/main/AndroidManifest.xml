@@ -2,6 +2,12 @@
     <!-- Required for the app to reach the SonicRelay API/WebSocket in release
          builds. Debug/profile manifests declare this separately for tooling. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Required by flutter_webrtc's NetworkMonitor: libwebrtc queries
+         ConnectivityManager/WifiManager on its native network thread, and a
+         missing permission throws SecurityException there, which aborts the
+         whole process (SIGABRT in jvm.cc) rather than surfacing as a Dart error. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <application
         android:label="sonic_relay"
         android:name="${applicationName}"

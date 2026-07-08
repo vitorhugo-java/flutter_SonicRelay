@@ -68,5 +68,19 @@ void main() {
       expect(candidate.sdpMid, isNull);
       expect(candidate.sdpMLineIndex, isNull);
     });
+
+    test('exposes a non-null sdpMid for the native WebRTC layer', () {
+      // Android's libwebrtc aborts the process (SIGABRT) if addIceCandidate
+      // receives a null sdpMid, so a mid-less candidate must coalesce to ''.
+      const withMid = RtcIceCandidate(
+        candidate: 'c',
+        sdpMid: '0',
+        sdpMLineIndex: 0,
+      );
+      const withoutMid = RtcIceCandidate(candidate: 'c', sdpMLineIndex: 0);
+
+      expect(withMid.nativeSafeSdpMid, '0');
+      expect(withoutMid.nativeSafeSdpMid, '');
+    });
   });
 }

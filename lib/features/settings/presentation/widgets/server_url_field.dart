@@ -43,7 +43,7 @@ class _ServerUrlFieldState extends ConsumerState<ServerUrlField> {
     final url = AppConfig.normalizeServerUrl(_controller.text);
     if (!_isValid(url)) {
       setState(() {
-        _error = 'Enter a valid URL, e.g. https://sonicRelay-api.hugodotnet.dev';
+        _error = 'Enter a valid URL, e.g. https://sonicrelay-api.hugodotnet.dev';
       });
       return;
     }
@@ -71,6 +71,7 @@ class _ServerUrlFieldState extends ConsumerState<ServerUrlField> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const SizedBox(height: AppSpacing.sm),
         SonicTextField(
           label: 'Server URL',
           controller: _controller,
@@ -89,7 +90,7 @@ class _ServerUrlFieldState extends ConsumerState<ServerUrlField> {
                 onPressed: _save,
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.xl),
             IconButton(
               tooltip: 'Restore default',
               onPressed: _resetToDefault,

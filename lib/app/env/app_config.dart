@@ -6,7 +6,7 @@ class AppConfig {
   /// through the in-app server URL field.
   static const defaultServerUrl = String.fromEnvironment(
     'SONIC_RELAY_API_URL',
-    defaultValue: 'https://sonicRelay-api.hugodotnet.dev',
+    defaultValue: 'https://sonicrelay-api.hugodotnet.dev',
   );
 
   factory AppConfig.fromEnvironment() =>

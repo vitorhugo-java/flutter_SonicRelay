@@ -136,10 +136,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           title: const Text('Server settings'),
                           subtitle: const Text('Configure the SonicRelay server'),
                           childrenPadding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg,
+                            AppSpacing.xl,
                             0,
-                            AppSpacing.lg,
-                            AppSpacing.lg,
+                            AppSpacing.xl,
+                            AppSpacing.xl,
                           ),
                           children: const [ServerUrlField()],
                         ),
