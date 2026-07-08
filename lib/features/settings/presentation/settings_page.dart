@@ -8,6 +8,7 @@ import '../../../core/widgets/sonic_card.dart';
 import '../../auth/presentation/login_view_model.dart';
 import '../../devices/presentation/devices_view_model.dart';
 import '../../devices/presentation/widgets/device_card.dart';
+import 'widgets/relay_mode_toggle.dart';
 import 'widgets/server_url_field.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -48,6 +49,14 @@ class SettingsPage extends ConsumerWidget {
                         ),
                         const SizedBox(height: AppSpacing.md),
                         const ServerUrlField(),
+                        const Divider(height: AppSpacing.xl),
+                        const _SettingsRow(
+                          icon: Icons.hub_outlined,
+                          title: 'Connection',
+                          subtitle: 'ICE transport',
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        const RelayModeToggle(),
                         const Divider(height: AppSpacing.xl),
                         const _SettingsRow(
                           icon: Icons.dark_mode_outlined,

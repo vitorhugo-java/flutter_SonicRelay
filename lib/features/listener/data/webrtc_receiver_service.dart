@@ -31,11 +31,13 @@ class WebRtcReceiverService {
     required AudioReceiverService audioReceiver,
     RtcIceServerConfig? iceServers,
     Future<RtcIceServerConfig> Function()? iceServersResolver,
+    bool Function()? forceRelay,
     Duration statsInterval = const Duration(seconds: 2),
   }) : _peerConnectionFactory = peerConnectionFactory,
        _audioReceiver = audioReceiver,
        _iceServers = iceServers ?? RtcIceServerConfig.defaults(),
        _iceServersResolver = iceServersResolver,
+       _forceRelay = forceRelay,
        _statsInterval = statsInterval;
 
   final RtcPeerConnectionFactory _peerConnectionFactory;
@@ -47,6 +49,10 @@ class WebRtcReceiverService {
   /// absent. Must never throw — the repository swallows failures into a
   /// fallback config.
   final Future<RtcIceServerConfig> Function()? _iceServersResolver;
+
+  /// Reads the user's relay-only preference at negotiation time (dynamic so a
+  /// toggle applies to the next connection). Null/false allows direct ICE.
+  final bool Function()? _forceRelay;
   final Duration _statsInterval;
   Timer? _statsTimer;
 
@@ -122,9 +128,12 @@ class WebRtcReceiverService {
 
       // Resolve ICE servers (with fresh TURN credentials) per negotiation; the
       // resolver never throws, falling back to the static config on failure.
-      final iceServers = _iceServersResolver != null
+      final resolved = _iceServersResolver != null
           ? await _iceServersResolver()
           : _iceServers;
+      final iceServers = (_forceRelay?.call() ?? false)
+          ? resolved.withRelay(true)
+          : resolved;
       final connection = await _peerConnectionFactory.create(iceServers);
       _peerConnection = connection;
       connection.onIceCandidate = _handleLocalCandidate;

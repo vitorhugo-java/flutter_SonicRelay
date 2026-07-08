@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
+import '../../core/storage/relay_mode_storage.dart';
 import '../../core/storage/secure_token_storage.dart';
 import '../../core/storage/server_config_storage.dart';
 import '../../core/webrtc/ice_servers_api.dart';
@@ -64,6 +65,30 @@ class ServerUrlNotifier extends Notifier<String> {
 final appConfigProvider = Provider<AppConfig>(
   (ref) => AppConfig.fromServerUrl(ref.watch(serverUrlProvider)),
 );
+
+final relayModeStorageProvider = Provider<RelayModeStorage>(
+  (ref) => RelayModeStorage(ref.watch(secureStorageProvider)),
+);
+
+/// Whether ICE is forced to relay-only (TURN). User-controlled and persisted;
+/// applied to the next WebRTC negotiation.
+final forceRelayProvider = NotifierProvider<ForceRelayNotifier, bool>(
+  ForceRelayNotifier.new,
+);
+
+class ForceRelayNotifier extends Notifier<bool> {
+  ForceRelayNotifier([this._initial = false]);
+
+  final bool _initial;
+
+  @override
+  bool build() => _initial;
+
+  Future<void> set(bool value) async {
+    await ref.read(relayModeStorageProvider).write(value);
+    state = value;
+  }
+}
 
 final tokenStorageProvider = Provider<TokenStorage>(
   (ref) => SecureTokenStorage(ref.watch(secureStorageProvider)),
@@ -163,6 +188,7 @@ final webRtcReceiverServiceProvider = Provider<WebRtcReceiverService>((ref) {
     audioReceiver: ref.watch(audioReceiverServiceProvider),
     iceServers: ref.watch(rtcIceServerConfigProvider),
     iceServersResolver: ref.watch(iceServersRepositoryProvider).resolve,
+    forceRelay: () => ref.read(forceRelayProvider),
   );
   ref.onDispose(service.dispose);
   return service;

@@ -222,6 +222,27 @@ void main() {
     );
   });
 
+  test('forceRelay makes the negotiation use relay-only ICE', () async {
+    final relayService = WebRtcReceiverService(
+      peerConnectionFactory: factory,
+      audioReceiver: audio,
+      forceRelay: () => true,
+    );
+    addTearDown(relayService.dispose);
+
+    await relayService.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final config = factory.iceConfigs.single;
+    expect(config.forceRelay, isTrue);
+    expect(config.toConfiguration()['iceTransportPolicy'], 'relay');
+  });
+
   test('offer sets remote description, answers, and emits webrtc.answer', () async {
     final outbound = <OutboundSignal>[];
     service.outboundSignals.listen(outbound.add);

@@ -14,6 +14,22 @@ void main() {
     expect((servers.single as Map).containsKey('credential'), isFalse);
   });
 
+  test('defaults to allowing direct (non-relay) ICE', () {
+    expect(RtcIceServerConfig.defaults().toConfiguration()['iceTransportPolicy'], 'all');
+  });
+
+  test('withRelay forces relay-only ICE while preserving the servers', () {
+    final base = RtcIceServerConfig.defaults();
+    final relayed = base.withRelay(true);
+
+    expect(relayed.forceRelay, isTrue);
+    expect(relayed.toConfiguration()['iceTransportPolicy'], 'relay');
+    // Server list is unchanged by the relay override.
+    expect(relayed.iceServers, base.iceServers);
+    // The original is untouched (immutable copy).
+    expect(base.toConfiguration()['iceTransportPolicy'], 'all');
+  });
+
   test('custom servers including TURN credentials serialize to configuration', () {
     const config = RtcIceServerConfig([
       RtcIceServer(urls: ['stun:stun.example:3478']),

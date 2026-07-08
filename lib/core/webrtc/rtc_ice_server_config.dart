@@ -19,7 +19,7 @@ class RtcIceServer {
 /// backend-provided server list. The default only uses a public STUN server;
 /// no private/production TURN credentials are embedded in the app.
 class RtcIceServerConfig {
-  const RtcIceServerConfig(this.iceServers);
+  const RtcIceServerConfig(this.iceServers, {this.forceRelay = false});
 
   /// MVP default: a single public STUN server, no TURN.
   factory RtcIceServerConfig.defaults() => const RtcIceServerConfig([
@@ -28,11 +28,21 @@ class RtcIceServerConfig {
 
   final List<RtcIceServer> iceServers;
 
+  /// When true, ICE only uses relay (TURN) candidates — `iceTransportPolicy:
+  /// 'relay'`. When false, direct (host/srflx) candidates are allowed too
+  /// (`'all'`). User-controlled so a viewer can force relay on hostile networks.
+  final bool forceRelay;
+
+  /// Returns a copy with [forceRelay] overridden; the server list is preserved.
+  RtcIceServerConfig withRelay(bool value) =>
+      RtcIceServerConfig(iceServers, forceRelay: value);
+
   /// The `configuration` map passed to `createPeerConnection`. Unified Plan
   /// is requested explicitly so a remote send-only audio track surfaces a
   /// receive-only transceiver without any local track being added.
   Map<String, dynamic> toConfiguration() => {
     'iceServers': iceServers.map((server) => server.toMap()).toList(),
     'sdpSemantics': 'unified-plan',
+    'iceTransportPolicy': forceRelay ? 'relay' : 'all',
   };
 }

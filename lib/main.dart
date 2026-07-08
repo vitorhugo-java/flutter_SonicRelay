@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app/di/app_providers.dart';
 import 'app/env/app_config.dart';
 import 'app/sonic_relay_app.dart';
+import 'core/storage/relay_mode_storage.dart';
 import 'core/storage/server_config_storage.dart';
 
 Future<void> main() async {
@@ -14,11 +15,13 @@ Future<void> main() async {
   final savedServerUrl =
       await const ServerConfigStorage(secureStorage).read() ??
       AppConfig.defaultServerUrl;
+  final savedForceRelay = await const RelayModeStorage(secureStorage).read();
 
   runApp(
     ProviderScope(
       overrides: [
         serverUrlProvider.overrideWith(() => ServerUrlNotifier(savedServerUrl)),
+        forceRelayProvider.overrideWith(() => ForceRelayNotifier(savedForceRelay)),
       ],
       child: const SonicRelayApp(),
     ),
