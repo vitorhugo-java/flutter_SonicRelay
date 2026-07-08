@@ -1,10 +1,13 @@
-name: Flutter CI
+name: CI/CD
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 env:
   FLUTTER_VERSION: "3.38.1"
@@ -51,7 +54,7 @@ jobs:
         run: flutter test
 
   build-android:
-    name: Build Android APK
+    name: Build Android APK and AAB
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,6 +65,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -73,16 +77,24 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # The release build type signs with the debug keys (see
-      # android/app/build.gradle.kts), so no signing keys or secrets are needed.
       - name: Build release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-number "${{ github.run_number }}"
+
+      - name: Build release AAB
+        run: flutter build appbundle --release --build-number "${{ github.run_number }}"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: sonic-relay-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonic-relay-aab
+          path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
   release:
@@ -110,13 +122,23 @@ jobs:
           name: sonic-relay-apk
           path: dist
 
-      - name: Rename APK
-        run: mv dist/app-release.apk "dist/sonic-relay-${{ steps.version.outputs.tag }}.apk"
+      - name: Download AAB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sonic-relay-aab
+          path: dist
+
+      - name: Rename release artifacts
+        run: |
+          mv dist/app-release.apk "dist/sonic-relay-${{ steps.version.outputs.tag }}.apk"
+          mv dist/app-release.aab "dist/sonic-relay-${{ steps.version.outputs.tag }}.aab"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          files: dist/sonic-relay-${{ steps.version.outputs.tag }}.apk
+          files: |
+            dist/sonic-relay-${{ steps.version.outputs.tag }}.apk
+            dist/sonic-relay-${{ steps.version.outputs.tag }}.aab
           generate_release_notes: true
