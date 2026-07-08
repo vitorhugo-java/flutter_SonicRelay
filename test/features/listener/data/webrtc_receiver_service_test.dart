@@ -72,9 +72,11 @@ class FakeRtcPeerConnection implements RtcPeerConnection {
 
 class FakeRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
   final List<FakeRtcPeerConnection> created = [];
+  final List<RtcIceServerConfig> iceConfigs = [];
 
   @override
   Future<RtcPeerConnection> create(RtcIceServerConfig iceServers) async {
+    iceConfigs.add(iceServers);
     final connection = FakeRtcPeerConnection();
     created.add(connection);
     return connection;
@@ -181,6 +183,43 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(outbound, isEmpty);
+  });
+
+  test('offer resolves ICE servers via the resolver and passes them to the '
+      'factory', () async {
+    var resolverCalls = 0;
+    final resolved = RtcIceServerConfig(const [
+      RtcIceServer(
+        urls: ['turn:relay.example.com:3478'],
+        username: 'user',
+        credential: 'secret',
+      ),
+    ]);
+    final resolvingService = WebRtcReceiverService(
+      peerConnectionFactory: factory,
+      audioReceiver: audio,
+      iceServersResolver: () async {
+        resolverCalls++;
+        return resolved;
+      },
+    );
+    addTearDown(resolvingService.dispose);
+
+    await resolvingService.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        from: 'publisher-1',
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(resolverCalls, 1);
+    expect(factory.iceConfigs.single, same(resolved));
+    expect(
+      factory.iceConfigs.single.iceServers.single.credential,
+      'secret',
+    );
   });
 
   test('offer sets remote description, answers, and emits webrtc.answer', () async {
