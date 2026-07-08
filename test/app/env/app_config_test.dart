@@ -35,7 +35,7 @@ void main() {
     test('defaults to the production server URL', () {
       expect(
         AppConfig.defaultServerUrl,
-        'https://sonicRelay-api.hugodotnet.dev',
+        'https://sonicrelay-api.hugodotnet.dev',
       );
     });
   });
