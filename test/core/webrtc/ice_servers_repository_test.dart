@@ -27,37 +27,40 @@ class _StubIceServersApi implements IceServersApi {
 
 IceServersResult _result({
   List<RtcIceServer>? servers,
-  int ttlSeconds = 3600,
+  required DateTime expiresAt,
 }) {
   return IceServersResult(
     config: RtcIceServerConfig(
       servers ??
           const [
             RtcIceServer(
-              urls: ['turn:relay.example.com:3478'],
+              urls: ['turn:sonicrelay-turn.hugodotnet.dev:3478?transport=udp'],
               username: 'u',
               credential: 'c',
             ),
           ],
     ),
-    ttlSeconds: ttlSeconds,
+    expiresAt: expiresAt,
   );
 }
 
 void main() {
   test('returns the fetched config', () async {
-    final api = _StubIceServersApi(_result());
-    final repo = IceServersRepository(api: api);
+    final now = DateTime.utc(2026);
+    final api = _StubIceServersApi(_result(expiresAt: now.add(const Duration(hours: 1))));
+    final repo = IceServersRepository(api: api, now: () => now);
 
     final config = await repo.resolve();
 
-    expect(config.iceServers.single.urls, ['turn:relay.example.com:3478']);
+    expect(config.iceServers.single.urls, [
+      'turn:sonicrelay-turn.hugodotnet.dev:3478?transport=udp',
+    ]);
     expect(api.calls, 1);
   });
 
-  test('caches until ttl minus the 60s safety margin', () async {
+  test('caches until 60s before expiresAt', () async {
     var now = DateTime.utc(2026);
-    final api = _StubIceServersApi(_result(ttlSeconds: 3600));
+    final api = _StubIceServersApi(_result(expiresAt: now.add(const Duration(hours: 1))));
     final repo = IceServersRepository(api: api, now: () => now);
 
     await repo.resolve();
@@ -70,27 +73,56 @@ void main() {
     expect(api.calls, 2);
   });
 
-  test('falls back to STUN defaults when the fetch fails and no cache exists',
-      () async {
-    final api = _StubIceServersApi(_result())
-      ..failWith(DioException(requestOptions: RequestOptions(path: '/x')));
-    final repo = IceServersRepository(api: api);
+  test(
+    'in dev mode, falls back to Google STUN defaults when the fetch fails and no cache exists',
+    () async {
+      final api = _StubIceServersApi(
+        _result(expiresAt: DateTime.utc(2026).add(const Duration(hours: 1))),
+      )..failWith(DioException(requestOptions: RequestOptions(path: '/x')));
+      final repo = IceServersRepository(
+        api: api,
+        allowGoogleStunDevFallback: true,
+      );
 
-    final config = await repo.resolve();
+      final config = await repo.resolve();
 
-    expect(config.iceServers.single.urls.first, startsWith('stun:'));
-  });
+      expect(config.iceServers.single.urls.first, startsWith('stun:'));
+    },
+  );
 
-  test('returns the last good cache when a later refresh fails', () async {
+  test(
+    'in production mode, does not fall back to Google STUN when the fetch fails and no cache exists',
+    () async {
+      final api = _StubIceServersApi(
+        _result(expiresAt: DateTime.utc(2026).add(const Duration(hours: 1))),
+      )..failWith(DioException(requestOptions: RequestOptions(path: '/x')));
+      final repo = IceServersRepository(
+        api: api,
+        allowGoogleStunDevFallback: false,
+      );
+
+      final config = await repo.resolve();
+
+      expect(config.iceServers, isEmpty);
+    },
+  );
+
+  test('returns the last good cache when a later refresh fails, even in production mode', () async {
     var now = DateTime.utc(2026);
-    final api = _StubIceServersApi(_result(ttlSeconds: 3600));
-    final repo = IceServersRepository(api: api, now: () => now);
+    final api = _StubIceServersApi(_result(expiresAt: now.add(const Duration(hours: 1))));
+    final repo = IceServersRepository(
+      api: api,
+      now: () => now,
+      allowGoogleStunDevFallback: false,
+    );
     await repo.resolve();
 
     api.failWith(DioException(requestOptions: RequestOptions(path: '/x')));
     now = now.add(const Duration(hours: 2));
 
     final config = await repo.resolve();
-    expect(config.iceServers.single.urls, ['turn:relay.example.com:3478']);
+    expect(config.iceServers.single.urls, [
+      'turn:sonicrelay-turn.hugodotnet.dev:3478?transport=udp',
+    ]);
   });
 }

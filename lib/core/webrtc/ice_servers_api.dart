@@ -2,13 +2,13 @@ import 'package:dio/dio.dart';
 
 import 'rtc_ice_server_config.dart';
 
-/// Result of fetching ICE servers from the backend: the server list plus the
-/// TTL (seconds) of any short-lived TURN credentials it carries.
+/// Result of fetching ICE servers from the backend: the server list plus
+/// when its (possibly time-limited TURN) credentials expire.
 class IceServersResult {
-  const IceServersResult({required this.config, required this.ttlSeconds});
+  const IceServersResult({required this.config, required this.expiresAt});
 
   final RtcIceServerConfig config;
-  final int ttlSeconds;
+  final DateTime expiresAt;
 }
 
 abstract interface class IceServersApi {
@@ -19,6 +19,11 @@ class DioIceServersApi implements IceServersApi {
   const DioIceServersApi(this._dio);
 
   final Dio _dio;
+
+  /// Assumed remaining lifetime when the backend omits `expiresAt`, so a
+  /// malformed response still expires and gets refreshed rather than being
+  /// cached forever.
+  static const _defaultTtl = Duration(hours: 1);
 
   @override
   Future<IceServersResult> fetch() async {
@@ -43,13 +48,23 @@ class DioIceServersApi implements IceServersApi {
         );
       }
     }
-    final ttl = data['ttlSeconds'];
+    // An empty (or missing) list is a valid, authoritative backend response
+    // (e.g. TURN not configured and the Google STUN dev fallback disabled).
+    // It must not be silently replaced with the dev defaults here — that
+    // fallback only happens when the request itself fails, and only in
+    // debug builds (see IceServersRepository).
     return IceServersResult(
-      config: servers.isEmpty
-          ? RtcIceServerConfig.defaults()
-          : RtcIceServerConfig(servers),
-      ttlSeconds: ttl is num ? ttl.toInt() : 3600,
+      config: RtcIceServerConfig(servers),
+      expiresAt: _readExpiresAt(data['expiresAt']),
     );
+  }
+
+  static DateTime _readExpiresAt(Object? value) {
+    if (value is String) {
+      final parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed.toUtc();
+    }
+    return DateTime.now().toUtc().add(_defaultTtl);
   }
 
   /// The backend serializes `urls` as a list, but tolerate a bare string too so

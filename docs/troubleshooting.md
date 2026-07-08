@@ -76,10 +76,19 @@ has not expired (codes have a limited TTL).
 
 ## No audio despite "Connected", or `Transport: Relay` unexpectedly
 
-Only a public STUN server is bundled (no TURN). On strict/symmetric NATs the media
-path may fail or fall back to relay that is not configured. Configure a TURN
-server in the ICE config (`lib/core/webrtc/rtc_ice_server_config.dart`) for
-reliable traversal.
+ICE servers (STUN and short-lived TURN credentials) come from the backend's
+`GET /api/webrtc/ice-servers` (see `IceServersRepository`); the SonicRelay
+coturn deployment backs the production TURN entry, so relay should generally
+work once the backend is reachable and authenticated. If the request fails
+in a debug build, the app falls back to a public STUN-only server
+(`stun:stun1.google.com:19302`, no TURN) — on strict/symmetric NATs that
+fallback can leave the media path unable to traverse, or unable to relay at
+all. In production the app never falls back to that STUN-only default
+silently: an unreachable backend simply yields an empty ICE server list.
+Check backend connectivity/auth and coturn reachability
+(`sonicrelay-turn.hugodotnet.dev`, ports `3478/udp`, `3478/tcp`, `5349/tcp`)
+first. To force relay-only ICE for debugging, use the "Force relay (TURN
+only)" toggle in Settings.
 
 ## Local development checklist
 

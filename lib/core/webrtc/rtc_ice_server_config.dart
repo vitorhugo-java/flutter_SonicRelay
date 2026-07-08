@@ -15,15 +15,19 @@ class RtcIceServer {
 
 /// ICE configuration for the viewer's [RtcPeerConnection].
 ///
-/// Kept as plain data so it can be built from [AppConfig] or a
-/// backend-provided server list. The default only uses a public STUN server;
-/// no private/production TURN credentials are embedded in the app.
+/// Kept as plain data so it can be built from a backend-provided server
+/// list. Production ICE servers always come from the authenticated
+/// `GET /api/webrtc/ice-servers` backend endpoint (see
+/// [IceServersRepository]), which serves the SonicRelay coturn deployment.
+/// [RtcIceServerConfig.defaults] is a development-only fallback used when
+/// that request fails in a debug build; it is never used silently in
+/// production and carries no private/production TURN credentials.
 class RtcIceServerConfig {
   const RtcIceServerConfig(this.iceServers, {this.forceRelay = false});
 
-  /// MVP default: a single public STUN server, no TURN.
+  /// Development-only fallback: a single public STUN server, no TURN.
   factory RtcIceServerConfig.defaults() => const RtcIceServerConfig([
-    RtcIceServer(urls: ['stun:stun.l.google.com:19302']),
+    RtcIceServer(urls: ['stun:stun1.google.com:19302']),
   ]);
 
   final List<RtcIceServer> iceServers;

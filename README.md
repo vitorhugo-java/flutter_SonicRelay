@@ -152,7 +152,7 @@ Negotiation runs entirely over the signaling socket described above:
 
 Responsibilities are split across the standard FDD boundaries:
 
-- `lib/core/webrtc` holds reusable, platform-facing adapters: `RtcIceServerConfig` (ICE/STUN/TURN configuration) and `RtcPeerConnectionFactory` (a thin, testable wrapper over `flutter_webrtc`). No private/production TURN credentials are embedded; the MVP default is a single public STUN server, and configuration can later come from `AppConfig` or the backend.
+- `lib/core/webrtc` holds reusable, platform-facing adapters: `RtcIceServerConfig` (ICE/STUN/TURN configuration), `IceServersApi`/`IceServersRepository` (fetch and cache ICE servers from the authenticated backend `GET /api/webrtc/ice-servers`, which serves the SonicRelay coturn deployment with short-lived TURN credentials), and `RtcPeerConnectionFactory` (a thin, testable wrapper over `flutter_webrtc`). No private/production TURN credentials are embedded in the app; `RtcIceServerConfig.defaults()` is a public-STUN-only fallback used solely when the backend request fails in a debug build.
 - `lib/features/listener/data` holds `WebRtcReceiverService` (the receive-only peer-connection state machine, signaling-agnostic via `handleSignal`/`outboundSignals`) and `AudioReceiverService` (remote audio playback).
 - `lib/features/listener/presentation` holds `ListenerViewModel`, which bridges `SignalingClient` and `WebRtcReceiverService` and exposes `ListenerConnectionState` and coarse `ListenerStats` to `ListenerPage`.
 
@@ -218,5 +218,5 @@ Surfaced during the 2026-07-06 integration pass (see [docs/integration-flow.md](
 
 - **UI does not yet auto-open signaling.** `/session/waiting` shows the prepared connection context, but wiring join → open-signaling → navigate-to-`/listener` into a single UI flow is not done. The signaling and WebRTC layers are complete and unit-tested behind their view models.
 - **Windows publisher envelope mismatch.** The current [windows_SonicRelay](https://github.com/vitorhugo-java/windows_SonicRelay) signaling envelope serializes a `viewerId` field and sends `publisher.ready` with no recipient, while the backend routes strictly on `to`/`from` participant UUIDs. Until the publisher aligns with the backend protocol, end-to-end audio will not establish. See [docs/troubleshooting.md](docs/troubleshooting.md).
-- **STUN only.** The bundled ICE config uses a single public STUN server and no TURN, so strict/symmetric NATs may fail to establish a media path until a TURN server is configured.
+- **Backend-provided TURN in production.** ICE servers, including short-lived TURN credentials, are fetched from `GET /api/webrtc/ice-servers`. The bundled `RtcIceServerConfig.defaults()` fallback (public STUN only, no TURN) is used only when that request fails and the app is a debug build; strict/symmetric NATs will fail to establish a media path in that fallback path.
 - **No live E2E in CI.** Verification is static contract alignment plus `flutter analyze`, `flutter test`, and an Android build — not a live audio session against a running backend and publisher.
