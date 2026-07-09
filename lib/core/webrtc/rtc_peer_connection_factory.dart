@@ -158,6 +158,11 @@ abstract class RtcPeerConnectionFactory {
 class FlutterWebRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
   const FlutterWebRtcPeerConnectionFactory();
 
+  /// Whether the native WebRTC stack was already initialized with the media
+  /// audio configuration. `WebRTC.initialize` only takes effect before the
+  /// first peer-connection factory comes up, so it must run exactly once.
+  static bool _nativeAudioInitialized = false;
+
   @override
   Future<RtcPeerConnection> create(RtcIceServerConfig iceServers) async {
     await _configureMediaPlaybackAudio();
@@ -177,12 +182,38 @@ class FlutterWebRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
   /// app's audio to muffled, low-bitrate "phone call" quality for as long as
   /// the session is up (issue #14).
   ///
-  /// [webrtc.AndroidAudioConfiguration.media] pins `MODE_NORMAL` +
-  /// `USAGE_MEDIA` + `STREAM_MUSIC`, so global Android audio keeps full quality
-  /// and focus is cleanly abandoned on teardown. `setAndroidAudioConfiguration`
-  /// is a no-op off Android, so this is safe to call unconditionally.
+  /// Two pieces are required, and both matter (issue: audio still played on
+  /// the *call* volume stream at low volume with only the Helper call):
+  ///
+  /// 1. `WebRTC.initialize(androidAudioConfiguration: media)` — the native
+  ///    `JavaAudioDeviceModule` builds its playback `AudioTrack` with the
+  ///    audio attributes captured when the factory is first created. Without
+  ///    this, the track keeps `USAGE_VOICE_COMMUNICATION` and Android routes
+  ///    it through the call volume stream no matter what the `AudioManager`
+  ///    mode says. It must run before the first `createPeerConnection`.
+  /// 2. `Helper.setAndroidAudioConfiguration(media)` — pins the session's
+  ///    `AudioManager` to `MODE_NORMAL` + `USAGE_MEDIA` + `STREAM_MUSIC`, so
+  ///    global Android audio keeps full quality and focus is cleanly
+  ///    abandoned on teardown (issue #14).
+  ///
+  /// Both calls are Android-only no-ops elsewhere, so this is safe to call
+  /// unconditionally.
   Future<void> _configureMediaPlaybackAudio() async {
     try {
+      if (!_nativeAudioInitialized && webrtc.WebRTC.platformIsAndroid) {
+        sonicLog(
+          'Audio',
+          'initializing native WebRTC with media audio attributes '
+              '(USAGE_MEDIA / CONTENT_TYPE_MUSIC) before first factory use',
+        );
+        await webrtc.WebRTC.initialize(
+          options: {
+            'androidAudioConfiguration':
+                webrtc.AndroidAudioConfiguration.media.toMap(),
+          },
+        );
+        _nativeAudioInitialized = true;
+      }
       sonicLog(
         'Audio',
         'applying Android media playback profile '
