@@ -6,19 +6,24 @@ import '../../../../core/webrtc/rtc_peer_connection_factory.dart';
 import '../../../../core/widgets/sonic_card.dart';
 
 /// Shows the live quality metrics for the session: estimated round-trip time,
-/// inbound jitter, and the transport mode (direct/relay/unknown). Any metric
-/// that is not yet available renders as "—".
+/// inbound jitter, recent packet loss, and the transport mode
+/// (direct/relay/unknown). Any metric that is not yet available renders as
+/// "—".
 class LatencyCard extends StatelessWidget {
   const LatencyCard({
     required this.rttMs,
     required this.jitterMs,
     required this.transport,
+    this.packetLossPercent,
     super.key,
   });
 
   final double? rttMs;
   final double? jitterMs;
   final RtcTransportMode transport;
+
+  /// Packet loss over the last stats interval, as a percentage.
+  final double? packetLossPercent;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +60,14 @@ class LatencyCard extends StatelessWidget {
                   icon: Icons.show_chart_rounded,
                 ),
               ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _Metric(
+                  label: 'Loss',
+                  value: _formatPercent(packetLossPercent),
+                  icon: Icons.signal_cellular_connected_no_internet_0_bar_rounded,
+                ),
+              ),
             ],
           ),
         ],
@@ -65,6 +78,11 @@ class LatencyCard extends StatelessWidget {
   static String _formatMs(double? value) {
     if (value == null) return '—';
     return '${value.round()} ms';
+  }
+
+  static String _formatPercent(double? value) {
+    if (value == null) return '—';
+    return '${value.toStringAsFixed(1)}%';
   }
 }
 

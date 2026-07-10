@@ -1,21 +1,36 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:sonic_relay/core/webrtc/rtc_peer_connection_factory.dart';
 
 /// Guards the audio profile the receiver factory pushes into flutter_webrtc.
 ///
-/// The viewer is receive-only, so it must run the Android audio session in a
-/// *media playback* profile. Left on flutter_webrtc's defaults it would put the
-/// whole device into `MODE_IN_COMMUNICATION` / `USAGE_VOICE_COMMUNICATION`,
-/// muffling every app's audio into "phone call" quality for the duration of the
-/// session (issue #14). This test locks the preset we rely on so a dependency
-/// bump that changes its meaning fails loudly here instead of on a real phone.
+/// Two behaviors are locked here, so a dependency bump that changes their
+/// meaning fails loudly instead of on a real phone:
+///
+/// - issue #14: the viewer is receive-only and must run in a *media playback*
+///   profile — `MODE_NORMAL` / `USAGE_MEDIA` / `STREAM_MUSIC` — never the
+///   call/communication routing that muffles every app's audio.
+/// - issue #19: the viewer must *mix* with other apps' media instead of
+///   pausing it. The `AndroidAudioConfiguration.media` preset requests
+///   continuous exclusive focus (`AUDIOFOCUS_GAIN`), which pauses Spotify and
+///   friends on connect; the factory therefore uses its own configuration
+///   with `manageAudioFocus: false`.
 void main() {
-  group('AndroidAudioConfiguration.media (issue #14 audio profile)', () {
-    final map = AndroidAudioConfiguration.media.toMap();
+  group('concurrentPlaybackAudioConfiguration (issues #14/#19)', () {
+    final map = FlutterWebRtcPeerConnectionFactory
+        .concurrentPlaybackAudioConfiguration
+        .toMap();
+
+    test('does not manage audio focus, so other media keeps playing', () {
+      expect(map['manageAudioFocus'], isFalse);
+    });
 
     test('uses MODE_NORMAL, not a call/communication mode', () {
       expect(map['androidAudioMode'], AndroidAudioMode.normal.name);
-      expect(map['androidAudioMode'], isNot(AndroidAudioMode.inCommunication.name));
+      expect(
+        map['androidAudioMode'],
+        isNot(AndroidAudioMode.inCommunication.name),
+      );
       expect(map['androidAudioMode'], isNot(AndroidAudioMode.inCall.name));
     });
 
@@ -31,18 +46,30 @@ void main() {
     });
 
     test('requests the music stream, not the voice-call stream', () {
-      expect(
-        map['androidAudioStreamType'],
-        AndroidAudioStreamType.music.name,
-      );
+      expect(map['androidAudioStreamType'], AndroidAudioStreamType.music.name);
       expect(
         map['androidAudioStreamType'],
         isNot(AndroidAudioStreamType.voiceCall.name),
       );
     });
 
-    test('manages audio focus so it is cleanly abandoned on teardown', () {
-      expect(map['manageAudioFocus'], isTrue);
+    test('marks content as music for the platform mixer', () {
+      expect(
+        map['androidAudioAttributesContentType'],
+        AndroidAudioAttributesContentType.music.name,
+      );
     });
+
+    test(
+      'differs from the media preset exactly by not taking audio focus',
+      () {
+        // The preset pauses other players via AUDIOFOCUS_GAIN (issue #19); if a
+        // future flutter_webrtc makes the preset stop managing focus, this
+        // custom configuration can be reconsidered.
+        final preset = AndroidAudioConfiguration.media.toMap();
+        expect(preset['manageAudioFocus'], isTrue);
+        expect(map['manageAudioFocus'], isFalse);
+      },
+    );
   });
 }

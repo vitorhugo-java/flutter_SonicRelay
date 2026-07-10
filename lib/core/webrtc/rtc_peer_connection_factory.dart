@@ -100,6 +100,42 @@ enum RtcTransportMode {
   unknown,
 }
 
+/// Cumulative receiver-side counters from the audio `inbound-rtp` stats report
+/// (windows_SonicRelay issue #31 companion). Values are cumulative since the
+/// connection started; interval metrics (packet-loss %, concealment %, average
+/// jitter-buffer delay) are derived by the listener layer from successive
+/// polls. Any counter the platform does not report is null.
+class RtcInboundAudioStats {
+  const RtcInboundAudioStats({
+    this.packetsReceived,
+    this.packetsLost,
+    this.packetsDiscarded,
+    this.fecPacketsReceived,
+    this.concealedSamples,
+    this.concealmentEvents,
+    this.totalSamplesReceived,
+    this.jitterBufferDelaySeconds,
+    this.jitterBufferTargetDelaySeconds,
+    this.jitterBufferEmittedCount,
+  });
+
+  final int? packetsReceived;
+  final int? packetsLost;
+  final int? packetsDiscarded;
+  final int? fecPacketsReceived;
+  final int? concealedSamples;
+  final int? concealmentEvents;
+  final int? totalSamplesReceived;
+
+  /// Sum of time each emitted sample spent in the jitter buffer, in seconds.
+  final double? jitterBufferDelaySeconds;
+
+  /// Sum of the buffer's target delay at each emit, in seconds.
+  final double? jitterBufferTargetDelaySeconds;
+
+  final int? jitterBufferEmittedCount;
+}
+
 /// Coarse, display-only connection statistics polled from the peer connection.
 /// Carries only numbers and a transport label — never SDP or candidate bodies.
 class RtcConnectionStats {
@@ -107,6 +143,7 @@ class RtcConnectionStats {
     this.rttMs,
     this.jitterMs,
     this.transport = RtcTransportMode.unknown,
+    this.inboundAudio,
   });
 
   /// Estimated round-trip time in milliseconds, when available.
@@ -116,6 +153,9 @@ class RtcConnectionStats {
   final double? jitterMs;
 
   final RtcTransportMode transport;
+
+  /// Cumulative inbound audio counters, when the platform reports them.
+  final RtcInboundAudioStats? inboundAudio;
 }
 
 /// A handle over a remote media stream. The viewer only ever consumes audio.
@@ -163,6 +203,33 @@ class FlutterWebRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
   /// first peer-connection factory comes up, so it must run exactly once.
   static bool _nativeAudioInitialized = false;
 
+  /// Android audio profile for *concurrent* media playback (issue #19).
+  ///
+  /// SonicRelay is an audio-only remote viewer, so its audio must mix with
+  /// whatever the device is already playing (Spotify, YouTube Music,
+  /// podcasts…). The `AndroidAudioConfiguration.media` preset used previously
+  /// keeps `manageAudioFocus: true` with `AUDIOFOCUS_GAIN`, which tells
+  /// Android to take *continuous, exclusive* focus — other media apps get a
+  /// focus-loss and pause (or duck) the moment the relay connects.
+  ///
+  /// `manageAudioFocus: false` stops flutter_webrtc from requesting (and
+  /// abandoning) focus entirely, so connecting/disconnecting never touches
+  /// the state of external players. The remaining fields preserve the issue
+  /// #14 fix: `MODE_NORMAL` + `USAGE_MEDIA` + `STREAM_MUSIC` keep playback on
+  /// the media volume stream at full quality, never call/communication
+  /// routing. Exposed (rather than private) so tests can lock its meaning
+  /// against dependency bumps.
+  static final webrtc.AndroidAudioConfiguration
+  concurrentPlaybackAudioConfiguration = webrtc.AndroidAudioConfiguration(
+    manageAudioFocus: false,
+    androidAudioMode: webrtc.AndroidAudioMode.normal,
+    androidAudioStreamType: webrtc.AndroidAudioStreamType.music,
+    androidAudioAttributesUsageType:
+        webrtc.AndroidAudioAttributesUsageType.media,
+    androidAudioAttributesContentType:
+        webrtc.AndroidAudioAttributesContentType.music,
+  );
+
   @override
   Future<RtcPeerConnection> create(RtcIceServerConfig iceServers) async {
     await _configureMediaPlaybackAudio();
@@ -172,29 +239,34 @@ class FlutterWebRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
     return _FlutterWebRtcPeerConnection(connection);
   }
 
-  /// Forces flutter_webrtc's Android audio session into a *media playback*
-  /// profile before the peer connection (and its audio device) come up.
+  /// Forces flutter_webrtc's Android audio session into a *concurrent media
+  /// playback* profile before the peer connection (and its audio device) come
+  /// up.
   ///
   /// The viewer only ever plays a remote audio track — it is never a two-way
   /// call. Left to its defaults, flutter_webrtc's Android layer puts the whole
   /// device into `MODE_IN_COMMUNICATION` with `USAGE_VOICE_COMMUNICATION` /
   /// `STREAM_VOICE_CALL`. That routes media to the earpiece and drops *every*
   /// app's audio to muffled, low-bitrate "phone call" quality for as long as
-  /// the session is up (issue #14).
+  /// the session is up (issue #14). And it must not take audio focus either:
+  /// received audio mixes with other apps' media instead of pausing it
+  /// (issue #19) — see [concurrentPlaybackAudioConfiguration].
   ///
   /// Two pieces are required, and both matter (issue: audio still played on
   /// the *call* volume stream at low volume with only the Helper call):
   ///
-  /// 1. `WebRTC.initialize(androidAudioConfiguration: media)` — the native
+  /// 1. `WebRTC.initialize(androidAudioConfiguration: ...)` — the native
   ///    `JavaAudioDeviceModule` builds its playback `AudioTrack` with the
   ///    audio attributes captured when the factory is first created. Without
   ///    this, the track keeps `USAGE_VOICE_COMMUNICATION` and Android routes
   ///    it through the call volume stream no matter what the `AudioManager`
   ///    mode says. It must run before the first `createPeerConnection`.
-  /// 2. `Helper.setAndroidAudioConfiguration(media)` — pins the session's
+  /// 2. `Helper.setAndroidAudioConfiguration(...)` — pins the session's
   ///    `AudioManager` to `MODE_NORMAL` + `USAGE_MEDIA` + `STREAM_MUSIC`, so
-  ///    global Android audio keeps full quality and focus is cleanly
-  ///    abandoned on teardown (issue #14).
+  ///    global Android audio keeps full quality (issue #14). With
+  ///    `manageAudioFocus: false` no focus is requested here and none has to
+  ///    be abandoned on teardown, so connecting or disconnecting never
+  ///    pauses, resumes, or ducks another app's playback (issue #19).
   ///
   /// Both calls are Android-only no-ops elsewhere, so this is safe to call
   /// unconditionally.
@@ -204,23 +276,25 @@ class FlutterWebRtcPeerConnectionFactory implements RtcPeerConnectionFactory {
         sonicLog(
           'Audio',
           'initializing native WebRTC with media audio attributes '
-              '(USAGE_MEDIA / CONTENT_TYPE_MUSIC) before first factory use',
+              '(USAGE_MEDIA / CONTENT_TYPE_MUSIC, no audio focus) '
+              'before first factory use',
         );
         await webrtc.WebRTC.initialize(
           options: {
             'androidAudioConfiguration':
-                webrtc.AndroidAudioConfiguration.media.toMap(),
+                concurrentPlaybackAudioConfiguration.toMap(),
           },
         );
         _nativeAudioInitialized = true;
       }
       sonicLog(
         'Audio',
-        'applying Android media playback profile '
-            '(MODE_NORMAL / USAGE_MEDIA / STREAM_MUSIC) before negotiation',
+        'applying Android concurrent media playback profile '
+            '(MODE_NORMAL / USAGE_MEDIA / STREAM_MUSIC, mix with other apps) '
+            'before negotiation',
       );
       await webrtc.Helper.setAndroidAudioConfiguration(
-        webrtc.AndroidAudioConfiguration.media,
+        concurrentPlaybackAudioConfiguration,
       );
     } catch (error) {
       // Never let audio-routing configuration block a connection.
@@ -334,6 +408,7 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
       Map<Object?, Object?>? selectedPair;
       final candidates = <String, Map<Object?, Object?>>{};
       double? jitterMs;
+      RtcInboundAudioStats? inboundAudio;
 
       for (final report in reports) {
         final values = Map<Object?, Object?>.from(report.values);
@@ -350,10 +425,29 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
           case 'inbound-rtp':
             final isAudio =
                 values['kind'] == 'audio' || values['mediaType'] == 'audio';
+            if (!isAudio) break;
             final jitter = values['jitter'];
-            if (isAudio && jitter is num) {
+            if (jitter is num) {
               jitterMs = jitter.toDouble() * 1000;
             }
+            inboundAudio = RtcInboundAudioStats(
+              packetsReceived: _asInt(values['packetsReceived']),
+              packetsLost: _asInt(values['packetsLost']),
+              packetsDiscarded: _asInt(values['packetsDiscarded']),
+              fecPacketsReceived: _asInt(values['fecPacketsReceived']),
+              concealedSamples: _asInt(values['concealedSamples']),
+              concealmentEvents: _asInt(values['concealmentEvents']),
+              totalSamplesReceived: _asInt(values['totalSamplesReceived']),
+              jitterBufferDelaySeconds: _asDouble(
+                values['jitterBufferDelay'],
+              ),
+              jitterBufferTargetDelaySeconds: _asDouble(
+                values['jitterBufferTargetDelay'],
+              ),
+              jitterBufferEmittedCount: _asInt(
+                values['jitterBufferEmittedCount'],
+              ),
+            );
         }
       }
 
@@ -378,6 +472,7 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
 
       if (rttMs == null &&
           jitterMs == null &&
+          inboundAudio == null &&
           transport == RtcTransportMode.unknown) {
         return null;
       }
@@ -385,11 +480,17 @@ class _FlutterWebRtcPeerConnection implements RtcPeerConnection {
         rttMs: rttMs,
         jitterMs: jitterMs,
         transport: transport,
+        inboundAudio: inboundAudio,
       );
     } catch (_) {
       return null;
     }
   }
+
+  static int? _asInt(Object? value) => value is num ? value.toInt() : null;
+
+  static double? _asDouble(Object? value) =>
+      value is num ? value.toDouble() : null;
 
   @override
   Future<void> dispose() async {

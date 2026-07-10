@@ -416,6 +416,87 @@ void main() {
     expect(service.statsValue.transport, RtcTransportMode.relay);
   });
 
+  test('refreshStats derives interval loss/concealment/jitter-buffer metrics', () async {
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    final connection = factory.created.single;
+
+    // First poll: counters since connection start count as the first interval.
+    connection.nextStats = const RtcConnectionStats(
+      inboundAudio: RtcInboundAudioStats(
+        packetsReceived: 900,
+        packetsLost: 100,
+        packetsDiscarded: 3,
+        fecPacketsReceived: 12,
+        concealedSamples: 4800,
+        concealmentEvents: 5,
+        totalSamplesReceived: 96000,
+        jitterBufferDelaySeconds: 48,
+        jitterBufferEmittedCount: 960,
+      ),
+    );
+    await service.refreshStats();
+
+    // 100 / (900 + 100) = 10 % loss; 4800 / 96000 = 5 % concealment;
+    // 48 s / 960 emits = 50 ms average jitter-buffer delay.
+    expect(service.statsValue.packetLossPercent, closeTo(10, 0.001));
+    expect(service.statsValue.concealmentPercent, closeTo(5, 0.001));
+    expect(service.statsValue.jitterBufferDelayMs, closeTo(50, 0.001));
+    expect(service.statsValue.packetsReceived, 900);
+    expect(service.statsValue.packetsLost, 100);
+    expect(service.statsValue.packetsDiscarded, 3);
+    expect(service.statsValue.fecPacketsReceived, 12);
+    expect(service.statsValue.concealmentEvents, 5);
+
+    // Second poll: only the deltas count — 50 lost of 1050 new packets.
+    connection.nextStats = const RtcConnectionStats(
+      inboundAudio: RtcInboundAudioStats(
+        packetsReceived: 1900,
+        packetsLost: 150,
+        totalSamplesReceived: 192000,
+        concealedSamples: 4800,
+        jitterBufferDelaySeconds: 67.2,
+        jitterBufferEmittedCount: 1920,
+      ),
+    );
+    await service.refreshStats();
+
+    expect(
+      service.statsValue.packetLossPercent,
+      closeTo(50 / 1050 * 100, 0.001),
+    );
+    // No new concealed samples in the interval.
+    expect(service.statsValue.concealmentPercent, closeTo(0, 0.001));
+    // 19.2 s over 960 new emits = 20 ms.
+    expect(service.statsValue.jitterBufferDelayMs, closeTo(20, 0.001));
+    expect(service.statsValue.packetsLost, 150);
+  });
+
+  test('interval metrics stay null without traffic and survive missing counters', () async {
+    await service.handleSignal(
+      _message(
+        SignalingMessageType.webrtcOffer,
+        payload: {'sdp': 'offer-sdp', 'type': 'offer'},
+      ),
+    );
+    final connection = factory.created.single;
+    connection.nextStats = const RtcConnectionStats(
+      rttMs: 42,
+      inboundAudio: RtcInboundAudioStats(packetsReceived: 0, packetsLost: 0),
+    );
+
+    await service.refreshStats();
+
+    expect(service.statsValue.rttMs, 42);
+    expect(service.statsValue.packetLossPercent, isNull);
+    expect(service.statsValue.concealmentPercent, isNull);
+    expect(service.statsValue.jitterBufferDelayMs, isNull);
+  });
+
   test('leave disposes the peer connection, stops audio, and clears metrics', () async {
     await service.handleSignal(
       _message(

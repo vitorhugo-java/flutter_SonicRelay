@@ -66,6 +66,11 @@ class WebRtcReceiverService {
   final List<RtcIceCandidate> _pendingRemoteCandidates = [];
   String? _publisherId;
 
+  /// Cumulative inbound counters from the previous poll, so interval metrics
+  /// (loss %, concealment %, jitter-buffer delay) reflect the recent network
+  /// behavior instead of a lifetime average. Reset per peer connection.
+  RtcInboundAudioStats? _previousInboundAudio;
+
   ListenerConnectionState _state = ListenerConnectionState.idle;
   ListenerStats _stats = const ListenerStats.initial();
 
@@ -235,21 +240,89 @@ class WebRtcReceiverService {
     _statsTimer = null;
   }
 
-  /// Polls the peer connection for coarse stats (RTT, jitter, transport mode)
-  /// and folds them into [statsValue]. Public so the periodic poll is testable
-  /// without a real timer.
+  /// Polls the peer connection for coarse stats (RTT, jitter, transport mode,
+  /// inbound loss/concealment counters) and folds them into [statsValue].
+  /// Public so the periodic poll is testable without a real timer.
   Future<void> refreshStats() async {
     final connection = _peerConnection;
     if (connection == null) return;
     final stats = await connection.getStats();
     if (stats == null) return;
+
+    final inbound = stats.inboundAudio;
+    double? packetLossPercent;
+    double? concealmentPercent;
+    double? jitterBufferDelayMs;
+    if (inbound != null) {
+      // On the first poll of a connection the previous counters are zero, so
+      // the first interval covers everything since the connection came up.
+      final previous = _previousInboundAudio;
+      packetLossPercent = _intervalRatio(
+        _delta(previous?.packetsLost, inbound.packetsLost),
+        _sum(
+          _delta(previous?.packetsReceived, inbound.packetsReceived),
+          _delta(previous?.packetsLost, inbound.packetsLost),
+        ),
+        scale: 100,
+      );
+      concealmentPercent = _intervalRatio(
+        _delta(previous?.concealedSamples, inbound.concealedSamples),
+        _delta(previous?.totalSamplesReceived, inbound.totalSamplesReceived),
+        scale: 100,
+      );
+      jitterBufferDelayMs = _intervalRatio(
+        _delta(
+          previous?.jitterBufferDelaySeconds,
+          inbound.jitterBufferDelaySeconds,
+        ),
+        _delta(
+          previous?.jitterBufferEmittedCount,
+          inbound.jitterBufferEmittedCount,
+        ),
+        scale: 1000,
+      );
+      _previousInboundAudio = inbound;
+    }
+
     _setStats(
       _stats.copyWith(
         rttMs: stats.rttMs,
         jitterMs: stats.jitterMs,
         transport: stats.transport,
+        packetLossPercent: packetLossPercent,
+        concealmentPercent: concealmentPercent,
+        jitterBufferDelayMs: jitterBufferDelayMs,
+        packetsReceived: inbound?.packetsReceived,
+        packetsLost: inbound?.packetsLost,
+        packetsDiscarded: inbound?.packetsDiscarded,
+        fecPacketsReceived: inbound?.fecPacketsReceived,
+        concealmentEvents: inbound?.concealmentEvents,
       ),
     );
+  }
+
+  /// Delta between successive cumulative counters, clamped at zero so a stats
+  /// reset (renegotiation, SSRC change) never yields negative intervals.
+  static double? _delta(num? previous, num? current) {
+    if (current == null) return null;
+    final delta = current.toDouble() - (previous?.toDouble() ?? 0);
+    return delta < 0 ? 0 : delta;
+  }
+
+  static double? _sum(double? a, double? b) =>
+      a == null || b == null ? null : a + b;
+
+  /// `numerator / denominator * scale`, or null when either side is missing or
+  /// the interval carried no traffic (denominator zero).
+  static double? _intervalRatio(
+    double? numerator,
+    double? denominator, {
+    required double scale,
+  }) {
+    if (numerator == null || denominator == null || denominator <= 0) {
+      return null;
+    }
+    return numerator / denominator * scale;
   }
 
   void _emit(
@@ -277,6 +350,7 @@ class WebRtcReceiverService {
 
   Future<void> _disposePeerConnection() async {
     _remoteDescriptionSet = false;
+    _previousInboundAudio = null;
     final connection = _peerConnection;
     _peerConnection = null;
     if (connection != null) {

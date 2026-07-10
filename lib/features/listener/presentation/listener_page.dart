@@ -69,6 +69,7 @@ class ListenerPage extends ConsumerWidget {
                     rttMs: state.stats.rttMs,
                     jitterMs: state.stats.jitterMs,
                     transport: state.stats.transport,
+                    packetLossPercent: state.stats.packetLossPercent,
                   ),
                   const SizedBox(height: AppSpacing.md),
                   _MetricCard(
