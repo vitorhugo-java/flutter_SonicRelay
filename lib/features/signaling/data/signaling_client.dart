@@ -72,19 +72,24 @@ class SignalingClient {
     _deviceId = deviceId;
     _leaving = false;
 
-    final authSession = await _tokenStorage.read();
-    final headers = <String, String>{
-      if (authSession != null)
-        'Authorization': '${authSession.tokenType} ${authSession.accessToken}',
-    };
-
     final uri = _buildUri(session.signalingUrl, session.sessionId, deviceId);
     sonicLog(
       'Signaling',
-      'connect sessionId=${session.sessionId} deviceId=$deviceId '
-          'hasToken=${authSession != null} uri=$uri',
+      'connect sessionId=${session.sessionId} deviceId=$deviceId uri=$uri',
     );
-    await _webSocketClient.connect(uri, headers: headers);
+    // Read fresh on every (re)connect attempt, not just this initial one, so
+    // a token that expires mid-outage is picked up before the next retry
+    // instead of retrying forever with a stale, now-rejected token.
+    await _webSocketClient.connect(uri, headers: _resolveHeaders);
+  }
+
+  Future<Map<String, String>> _resolveHeaders() async {
+    final authSession = await _tokenStorage.read();
+    sonicLog('Signaling', 'resolved auth header hasToken=${authSession != null}');
+    return <String, String>{
+      if (authSession != null)
+        'Authorization': '${authSession.tokenType} ${authSession.accessToken}',
+    };
   }
 
   Uri _buildUri(Uri base, String sessionId, String deviceId) {

@@ -25,6 +25,11 @@ abstract interface class WebSocketConnection {
 typedef WebSocketConnector =
     Future<WebSocketConnection> Function(Uri uri, Map<String, String> headers);
 
+/// Produces connection headers (e.g. a bearer token) fresh for each connect
+/// attempt, so a token that expires mid-outage is picked up on the next retry
+/// instead of retrying forever with a stale, now-rejected header.
+typedef WebSocketHeadersProvider = FutureOr<Map<String, String>> Function();
+
 /// Default [WebSocketConnector] backed by `dart:io`'s [WebSocket].
 Future<WebSocketConnection> ioWebSocketConnector(
   Uri uri,
@@ -55,11 +60,17 @@ class ReconnectPolicy {
     this.initialDelay = const Duration(seconds: 1),
     this.maxDelay = const Duration(seconds: 30),
     this.multiplier = 2.0,
+    this.jitterRatio = 0.2,
   });
 
   final Duration initialDelay;
   final Duration maxDelay;
   final double multiplier;
+
+  /// Fraction of the computed delay randomized in both directions (e.g. 0.2
+  /// means +/-20%), so clients dropped by the same outage don't all retry the
+  /// API in lockstep. Zero disables jitter.
+  final double jitterRatio;
 
   Duration delayForAttempt(int attempt) {
     final scaledMillis =
@@ -69,6 +80,20 @@ class ReconnectPolicy {
       maxDelay.inMilliseconds.toDouble(),
     );
     return Duration(milliseconds: cappedMillis.round());
+  }
+
+  /// [delayForAttempt] jittered by +/-[jitterRatio], using [jitterSample] — a
+  /// value in [-1, 1] — as the random draw. Clamped to [0, maxDelay].
+  Duration jitteredDelayForAttempt(int attempt, double jitterSample) {
+    final base = delayForAttempt(attempt);
+    final ratio = jitterRatio.clamp(0.0, 1.0);
+    if (ratio <= 0) return base;
+    final fraction = ratio * jitterSample.clamp(-1.0, 1.0);
+    final jitteredMillis = (base.inMilliseconds * (1 + fraction)).clamp(
+      0.0,
+      maxDelay.inMilliseconds.toDouble(),
+    );
+    return Duration(milliseconds: jitteredMillis.round());
   }
 }
 
@@ -81,14 +106,17 @@ class WebSocketClient {
     required WebSocketConnector connector,
     ReconnectPolicy reconnectPolicy = const ReconnectPolicy(),
     Timer Function(Duration delay, void Function() callback)? scheduleTimer,
+    math.Random? random,
   }) : _connector = connector,
        _reconnectPolicy = reconnectPolicy,
-       _scheduleTimer = scheduleTimer ?? Timer.new;
+       _scheduleTimer = scheduleTimer ?? Timer.new,
+       _random = random ?? math.Random();
 
   final WebSocketConnector _connector;
   final ReconnectPolicy _reconnectPolicy;
   final Timer Function(Duration delay, void Function() callback)
   _scheduleTimer;
+  final math.Random _random;
 
   final _stateController =
       StreamController<WebSocketConnectionState>.broadcast();
@@ -105,12 +133,14 @@ class WebSocketClient {
   int _attempt = 0;
   bool _stopped = true;
   Uri? _uri;
-  Map<String, String> _headers = const {};
+  WebSocketHeadersProvider _headersProvider = _emptyHeaders;
 
-  Future<void> connect(Uri uri, {Map<String, String> headers = const {}}) async {
+  static Map<String, String> _emptyHeaders() => const {};
+
+  Future<void> connect(Uri uri, {WebSocketHeadersProvider? headers}) async {
     _stopped = false;
     _uri = uri;
-    _headers = headers;
+    _headersProvider = headers ?? _emptyHeaders;
     _attempt = 0;
     _reconnectTimer?.cancel();
     await _attemptConnect();
@@ -123,7 +153,11 @@ class WebSocketClient {
     }
     try {
       sonicLog('WebSocket', 'connecting to $_uri (attempt $_attempt)');
-      final connection = await _connector(_uri!, _headers);
+      // Resolved fresh on every attempt (not just the first) so a token that
+      // expired during the outage is refreshed before the next retry instead
+      // of retrying forever with a now-rejected header.
+      final headers = await _headersProvider();
+      final connection = await _connector(_uri!, headers);
       if (_stopped) {
         await connection.close();
         return;
@@ -167,7 +201,11 @@ class WebSocketClient {
 
   void _scheduleReconnect() {
     if (_stopped) return;
-    final delay = _reconnectPolicy.delayForAttempt(_attempt);
+    final jitterSample = _random.nextDouble() * 2 - 1;
+    final delay = _reconnectPolicy.jitteredDelayForAttempt(
+      _attempt,
+      jitterSample,
+    );
     _attempt++;
     _stateController.add(WebSocketConnectionState.reconnecting);
     _reconnectTimer = _scheduleTimer(delay, () {

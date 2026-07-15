@@ -152,6 +152,98 @@ void main() {
     expect(ready.to, 'publisher-1');
   });
 
+  test(
+    'participant.reconnected from the known publisher replies with viewer.ready',
+    () async {
+      await service.handleSignal(
+        _message(SignalingMessageType.publisherReady, from: 'publisher-1'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final outbound = <OutboundSignal>[];
+      service.outboundSignals.listen(outbound.add);
+
+      await service.handleSignal(
+        _message(
+          SignalingMessageType.participantReconnected,
+          from: 'publisher-1',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final ready = outbound.single;
+      expect(ready.type, SignalingMessageType.viewerReady);
+      expect(ready.to, 'publisher-1');
+    },
+  );
+
+  test(
+    'participant.reconnected from another participant is ignored',
+    () async {
+      await service.handleSignal(
+        _message(SignalingMessageType.publisherReady, from: 'publisher-1'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final outbound = <OutboundSignal>[];
+      service.outboundSignals.listen(outbound.add);
+
+      await service.handleSignal(
+        _message(
+          SignalingMessageType.participantReconnected,
+          from: 'some-other-viewer',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(outbound, isEmpty);
+    },
+  );
+
+  test(
+    'participant.reconnected before any publisher is known is ignored',
+    () async {
+      final outbound = <OutboundSignal>[];
+      service.outboundSignals.listen(outbound.add);
+
+      await service.handleSignal(
+        _message(
+          SignalingMessageType.participantReconnected,
+          from: 'publisher-1',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(outbound, isEmpty);
+    },
+  );
+
+  test(
+    'participant.disconnected does not change state or emit anything',
+    () async {
+      await service.handleSignal(
+        _message(SignalingMessageType.publisherReady, from: 'publisher-1'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final states = <ListenerConnectionState>[];
+      service.connectionState.listen(states.add);
+      final outbound = <OutboundSignal>[];
+      service.outboundSignals.listen(outbound.add);
+
+      await service.handleSignal(
+        _message(
+          SignalingMessageType.participantDisconnected,
+          from: 'publisher-1',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(states, isEmpty);
+      expect(outbound, isEmpty);
+    },
+  );
+
   test('session.joined for the publisher replies with viewer.ready', () async {
     final outbound = <OutboundSignal>[];
     service.outboundSignals.listen(outbound.add);

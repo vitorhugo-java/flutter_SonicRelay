@@ -8,6 +8,15 @@ enum SignalingMessageType {
   webrtcAnswer('webrtc.answer'),
   webrtcIceCandidate('webrtc.ice_candidate'),
   sessionEnded('session.ended'),
+
+  /// A participant's socket dropped but the backend's reconnect grace period
+  /// hasn't elapsed yet (transient — don't tear anything down for it).
+  participantDisconnected('participant.disconnected'),
+
+  /// A participant reconnected within the backend's grace period, reusing
+  /// its participant id.
+  participantReconnected('participant.reconnected'),
+
   error('error'),
   ping('ping'),
   pong('pong'),

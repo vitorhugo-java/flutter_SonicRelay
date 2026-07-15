@@ -1,7 +1,24 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
+
+/// A [math.Random] whose [nextDouble] always returns a fixed value, so
+/// jitter-dependent tests get a deterministic sample instead of a real draw.
+class _FixedRandom implements math.Random {
+  _FixedRandom(this._value);
+  final double _value;
+
+  @override
+  bool nextBool() => false;
+
+  @override
+  double nextDouble() => _value;
+
+  @override
+  int nextInt(int max) => 0;
+}
 
 class FakeWebSocketConnection implements WebSocketConnection {
   final _controller = StreamController<dynamic>.broadcast();
@@ -29,6 +46,30 @@ Timer _instantTimer(Duration delay, void Function() callback) =>
     Timer(Duration.zero, callback);
 
 void main() {
+  group('ReconnectPolicy', () {
+    test('zero jitter ratio returns the plain backoff delay', () {
+      const policy = ReconnectPolicy(jitterRatio: 0);
+      expect(
+        policy.jitteredDelayForAttempt(0, 1),
+        policy.delayForAttempt(0),
+      );
+    });
+
+    test('jitter never pushes the delay below zero', () {
+      const policy = ReconnectPolicy(jitterRatio: 1, maxDelay: Duration(seconds: 1));
+      expect(policy.jitteredDelayForAttempt(0, -1), Duration.zero);
+    });
+
+    test('jitter is clamped to maxDelay', () {
+      const policy = ReconnectPolicy(
+        initialDelay: Duration(seconds: 20),
+        maxDelay: Duration(seconds: 30),
+        jitterRatio: 1,
+      );
+      expect(policy.jitteredDelayForAttempt(0, 1), const Duration(seconds: 30));
+    });
+  });
+
   group('WebSocketClient', () {
     test('connects and emits connecting then connected', () async {
       final connections = <FakeWebSocketConnection>[];
@@ -152,6 +193,68 @@ void main() {
 
       expect(attempts, 3);
       expect(connections, hasLength(1));
+    });
+
+    test('reconnect delay is jittered per the configured ratio', () async {
+      final connections = <FakeWebSocketConnection>[];
+      final delays = <Duration>[];
+      final client = WebSocketClient(
+        connector: (uri, headers) async {
+          final connection = FakeWebSocketConnection();
+          connections.add(connection);
+          return connection;
+        },
+        scheduleTimer: (delay, callback) {
+          delays.add(delay);
+          return Timer(Duration.zero, callback);
+        },
+        reconnectPolicy: const ReconnectPolicy(jitterRatio: 0.5),
+        random: _FixedRandom(1.0),
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      connections.single.emitDone();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      // Base delay for the first attempt is 1s; a maximal +1 jitter sample
+      // scaled by a 0.5 ratio pushes it to 1.5s.
+      expect(delays, [const Duration(milliseconds: 1500)]);
+    });
+
+    test('reconnect resolves headers again for every attempt', () async {
+      final connections = <FakeWebSocketConnection>[];
+      final headersSeen = <Map<String, String>>[];
+      var callCount = 0;
+      final client = WebSocketClient(
+        connector: (uri, headers) async {
+          headersSeen.add(headers);
+          final connection = FakeWebSocketConnection();
+          connections.add(connection);
+          return connection;
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(
+        Uri.parse('wss://example.test/ws'),
+        headers: () {
+          callCount++;
+          return {'Authorization': 'Bearer token-$callCount'};
+        },
+      );
+      connections.single.emitDone();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(headersSeen, [
+        {'Authorization': 'Bearer token-1'},
+        {'Authorization': 'Bearer token-2'},
+      ]);
     });
 
     test('disconnect stops reconnect attempts', () async {

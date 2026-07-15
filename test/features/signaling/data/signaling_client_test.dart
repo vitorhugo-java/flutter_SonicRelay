@@ -175,6 +175,57 @@ void main() {
     await sub.cancel();
   });
 
+  test(
+    'reconnect re-reads the token so a rotated token is picked up',
+    () async {
+      final tokenStorage = FakeTokenStorage(
+        const AuthSession(
+          accessToken: 'token-abc',
+          refreshToken: 'refresh',
+          expiresIn: 3600,
+          tokenType: 'Bearer',
+        ),
+      );
+      final headersSeen = <Map<String, String>>[];
+      late FakeWebSocketConnection localConnection;
+      final webSocketClient = WebSocketClient(
+        connector: (uri, headers) async {
+          headersSeen.add(headers);
+          localConnection = FakeWebSocketConnection();
+          return localConnection;
+        },
+        scheduleTimer: _instantTimer,
+      );
+      final client = SignalingClient(
+        webSocketClient: webSocketClient,
+        tokenStorage: tokenStorage,
+      );
+      addTearDown(client.dispose);
+
+      await client.connect(session: session, deviceId: 'device-9');
+      await Future<void>.delayed(Duration.zero);
+
+      // The token rotates mid-outage (e.g. a background refresh completed).
+      await tokenStorage.write(
+        const AuthSession(
+          accessToken: 'token-xyz',
+          refreshToken: 'refresh-2',
+          expiresIn: 3600,
+          tokenType: 'Bearer',
+        ),
+      );
+      await localConnection.close();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(headersSeen, [
+        {'Authorization': 'Bearer token-abc'},
+        {'Authorization': 'Bearer token-xyz'},
+      ]);
+    },
+  );
+
   test('forwards unknown message types without throwing', () async {
     await signalingClient.connect(session: session, deviceId: 'device-9');
     await Future<void>.delayed(Duration.zero);

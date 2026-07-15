@@ -118,6 +118,24 @@ class WebRtcReceiverService {
         await _teardown(ListenerConnectionState.ended);
       case SignalingMessageType.sessionLeft:
         await _teardown(ListenerConnectionState.disconnected);
+      case SignalingMessageType.participantReconnected:
+        // The publisher's signaling socket reconnected within the backend's
+        // grace period. We're the answerer and cannot restart ICE ourselves,
+        // so nudge it to re-offer instead of waiting indefinitely for it to
+        // notice on its own. Ignore reconnects of other participants (e.g.
+        // another viewer in the same session) — we only ever talk to the
+        // publisher.
+        if (message.from != null && message.from == _publisherId) {
+          sonicLog(
+            'WebRTC',
+            'participant.reconnected from=${message.from} -> viewer.ready',
+          );
+          _emit(SignalingMessageType.viewerReady, const {}, to: message.from);
+        }
+      case SignalingMessageType.participantDisconnected:
+        // Transient — the backend's grace period is running. The peer
+        // connection (if any) is left alone; nothing to do here.
+        break;
       default:
         break;
     }
