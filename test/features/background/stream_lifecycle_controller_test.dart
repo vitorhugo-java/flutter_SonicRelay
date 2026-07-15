@@ -77,11 +77,11 @@ void main() {
     lastTimer = null;
   });
 
-  test('backgrounding while a stream is active starts the service', () {
+  test('a stream becoming active starts the service immediately, while still'
+      ' in the foreground', () {
     final controller = build();
-    controller.onConnectionState(ListenerConnectionState.connected);
 
-    controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.connected);
 
     expect(service.started, hasLength(1));
     expect(service.started.single.body, contains('Listening'));
@@ -90,45 +90,103 @@ void main() {
   test('does not start when the setting is disabled', () {
     keepPlaying = false;
     final controller = build();
-    controller.onConnectionState(ListenerConnectionState.connected);
 
-    controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.connected);
 
     expect(service.started, isEmpty);
   });
 
   test('does not start when no stream is active', () {
     final controller = build();
-    controller.onConnectionState(ListenerConnectionState.idle);
 
-    controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.idle);
 
     expect(service.started, isEmpty);
   });
 
-  test('returning to the foreground stops the service without a notice', () {
+  test(
+    'foreground/background transitions neither stop nor restart a running'
+    ' service',
+    () {
+      final controller = build();
+      controller.onConnectionState(ListenerConnectionState.connected);
+
+      controller.onAppForegroundChanged(false);
+      controller.onAppForegroundChanged(true);
+      controller.onAppForegroundChanged(false);
+
+      expect(service.started, hasLength(1));
+      expect(service.stopped, isEmpty);
+    },
+  );
+
+  test(
+    'enabling the setting mid-stream while foregrounded starts the service'
+    ' once the app backgrounds',
+    () {
+      keepPlaying = false;
+      final controller = build();
+      controller.onConnectionState(ListenerConnectionState.connected);
+      expect(service.started, isEmpty);
+
+      keepPlaying = true;
+      controller.onAppForegroundChanged(false);
+
+      expect(service.started, hasLength(1));
+    },
+  );
+
+  test('reconnecting while still foregrounded does not arm the bounded'
+      ' reconnect timeout', () {
+    final controller = build();
+    controller.onConnectionState(ListenerConnectionState.connected);
+
+    controller.onConnectionState(ListenerConnectionState.reconnecting);
+
+    expect(lastTimer, isNull);
+  });
+
+  test('backgrounding while already reconnecting arms the bounded reconnect'
+      ' timeout', () {
+    final controller = build();
+    controller.onConnectionState(ListenerConnectionState.connected);
+    controller.onConnectionState(ListenerConnectionState.reconnecting);
+    expect(lastTimer, isNull);
+
+    controller.onAppForegroundChanged(false);
+
+    expect(lastTimer, isNotNull);
+    expect(lastTimer!.isActive, isTrue);
+  });
+
+  test('returning to the foreground while reconnecting cancels the bounded'
+      ' reconnect timeout, so the user is never kicked out from under'
+      ' themselves', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
     controller.onAppForegroundChanged(false);
+    controller.onConnectionState(ListenerConnectionState.reconnecting);
+    expect(lastTimer!.isActive, isTrue);
 
     controller.onAppForegroundChanged(true);
 
-    expect(service.stopped, [null]);
+    expect(lastTimer!.isActive, isFalse);
+    expect(stopRequests, 0);
+    expect(service.stopped, isEmpty);
   });
 
   test('does not start twice while already running', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
+
     controller.onConnectionState(ListenerConnectionState.connected);
 
     expect(service.started, hasLength(1));
   });
 
-  test('a state change while backgrounded updates the notification', () {
+  test('a state change while running updates the notification', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
 
     controller.onConnectionState(ListenerConnectionState.reconnecting);
 
@@ -138,7 +196,6 @@ void main() {
   test('a terminal state while running stops with an ended notice', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
 
     controller.onConnectionState(ListenerConnectionState.ended);
 
@@ -146,8 +203,8 @@ void main() {
     expect(service.stopped.single, isNotNull);
   });
 
-  test('reconnect timeout stops the service and gives up the peer connection',
-      () {
+  test('reconnect timeout stops the service and gives up the peer connection'
+      ' (while backgrounded)', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
     controller.onAppForegroundChanged(false);
@@ -189,7 +246,6 @@ void main() {
   test('forceStop stops a running service (logout)', () {
     final controller = build();
     controller.onConnectionState(ListenerConnectionState.connected);
-    controller.onAppForegroundChanged(false);
 
     controller.forceStop();
 

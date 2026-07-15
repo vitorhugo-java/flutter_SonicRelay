@@ -17,7 +17,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="sonic_relay"
-        android:name="${applicationName}"
+        android:name=".SonicRelayApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -44,10 +44,13 @@
         <!-- Foreground service that keeps audio playing while backgrounded during
              an active stream. mediaPlayback is the correct type for receiving and
              playing SonicRelay audio. Not exported and never started from
-             BOOT_COMPLETED — the user starts/joins a stream intentionally. -->
+             BOOT_COMPLETED — the user starts/joins a stream intentionally.
+             stopWithTask=false: swiping SonicRelay away from recent apps must
+             not stop the active stream (issue #22). -->
         <service
             android:name=".background.SonicRelayForegroundService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

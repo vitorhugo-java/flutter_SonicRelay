@@ -32,7 +32,9 @@ class ForegroundStreamNotification {
 }
 
 /// Controls the platform foreground service that keeps the viewer process alive
-/// (and audio playing) while the app is backgrounded during an active stream.
+/// (and audio playing) for the entire duration of an active stream — started as
+/// soon as the stream becomes active, not only once the app is backgrounded
+/// (see `StreamLifecycleController`).
 ///
 /// The active WebRTC/signaling lifetime already lives in provider-owned services
 /// that outlive the widget tree; this only governs *process survival* and the

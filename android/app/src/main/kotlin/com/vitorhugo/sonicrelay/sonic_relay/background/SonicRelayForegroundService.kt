@@ -46,9 +46,25 @@ class SonicRelayForegroundService : Service() {
                 stopSelf()
             }
         }
-        // Do not auto-restart if the system kills us; the user starts streams
-        // intentionally and Dart re-drives the service on the next stream.
+        // Do not auto-restart if the system kills us. The active stream state
+        // (peer connection, signaling socket, audio) lives in the Dart isolate
+        // hosted by the process-lifetime FlutterEngine (see
+        // SonicRelayApplication), not in this service, so a bare restart here
+        // could not resurrect it anyway — the user starts streams intentionally
+        // and Dart re-drives the service on the next one.
         return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Intentionally a no-op: this service (and the process/engine it keeps
+        // alive) must keep running when the user swipes SonicRelay away from
+        // recent apps while a stream is active — that's the whole point of
+        // promoting to a foreground service. The default Service behavior
+        // already doesn't stop the service on task removal, and the manifest
+        // sets android:stopWithTask="false" explicitly; this override exists so
+        // the intent is documented and a future edit doesn't accidentally add a
+        // stopSelf() here. See issue #22.
     }
 
     private fun startForegroundCompat(notification: Notification) {

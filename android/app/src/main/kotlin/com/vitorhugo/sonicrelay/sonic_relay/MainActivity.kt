@@ -14,6 +14,14 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
+    // Attach to the process-lifetime engine pre-warmed in [SonicRelayApplication]
+    // instead of letting the framework create one scoped to this activity. A
+    // non-null cached engine id also makes the base class's
+    // shouldDestroyEngineWithHost() return false, so destroying this activity
+    // (e.g. the task being swiped away) no longer tears down the Dart isolate
+    // and kills the active stream. See issue #22.
+    override fun getCachedEngineId(): String = SonicRelayApplication.ENGINE_ID
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
@@ -31,7 +39,11 @@ class MainActivity : FlutterActivity() {
                             call.argument<Boolean>("showReconnect") ?: false,
                         )
                     }
-                    ContextCompat.startForegroundService(this, intent)
+                    // applicationContext, not this activity: these channel handlers
+                    // stay registered on the engine's messenger (which outlives this
+                    // activity instance) and this method can legitimately still be
+                    // invoked from Dart while no activity is attached.
+                    ContextCompat.startForegroundService(applicationContext, intent)
                     result.success(null)
                 }
                 "stop" -> {
@@ -44,7 +56,7 @@ class MainActivity : FlutterActivity() {
                     }
                     // A running foreground service permits starting a service even
                     // from the background, so this is safe while backgrounded.
-                    startService(intent)
+                    applicationContext.startService(intent)
                     result.success(null)
                 }
                 else -> result.notImplemented()
