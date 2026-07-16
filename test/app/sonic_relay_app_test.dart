@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,8 +20,14 @@ class EmptyTokenStorage implements TokenStorage {
   Future<void> write(AuthSession session) async {}
 }
 
+String _testDiagnosticsDirectory() =>
+    Directory.systemTemp.createTempSync('sonicrelay_app_test_').path;
+
 ProviderScope testApp() => ProviderScope(
-  overrides: [tokenStorageProvider.overrideWithValue(EmptyTokenStorage())],
+  overrides: [
+    tokenStorageProvider.overrideWithValue(EmptyTokenStorage()),
+    diagnosticsDirectoryProvider.overrideWithValue(_testDiagnosticsDirectory()),
+  ],
   child: const SonicRelayApp(),
 );
 
@@ -48,6 +56,9 @@ void main() {
     Future<void> pumpPage(Widget page) async {
       await tester.pumpWidget(
         ProviderScope(
+          overrides: [
+            diagnosticsDirectoryProvider.overrideWithValue(_testDiagnosticsDirectory()),
+          ],
           child: MaterialApp(
             theme: ThemeData.dark(useMaterial3: true),
             home: page,

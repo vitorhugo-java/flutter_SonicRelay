@@ -178,6 +178,7 @@ final signalingClientProvider = Provider<SignalingClient>(
   (ref) => SignalingClient(
     webSocketClient: ref.watch(webSocketClientProvider),
     tokenStorage: ref.watch(tokenStorageProvider),
+    diagnosticLog: ref.watch(diagnosticLogProvider),
   ),
 );
 

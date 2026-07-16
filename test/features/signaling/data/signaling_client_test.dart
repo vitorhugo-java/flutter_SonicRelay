@@ -84,6 +84,7 @@ void main() {
           tokenType: 'Bearer',
         ),
       ),
+      diagnosticLog: _testLog(),
     );
     session = StreamSession(
       sessionId: 'session-1',
@@ -206,6 +207,7 @@ void main() {
       final client = SignalingClient(
         webSocketClient: webSocketClient,
         tokenStorage: tokenStorage,
+        diagnosticLog: _testLog(),
       );
       addTearDown(client.dispose);
 

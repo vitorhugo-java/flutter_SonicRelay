@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
-import '../../../core/diagnostics/sonic_log.dart';
+import '../../../core/diagnostics/diagnostic_log.dart';
 import '../../../core/storage/secure_token_storage.dart';
 import '../../../core/websocket/websocket_client.dart';
 import '../../../core/websocket/websocket_message.dart';
@@ -28,10 +28,12 @@ class SignalingClient {
   SignalingClient({
     required WebSocketClient webSocketClient,
     required TokenStorage tokenStorage,
+    required DiagnosticLog diagnosticLog,
     SignalingMessageMapper mapper = const SignalingMessageMapper(),
     Random? random,
   }) : _webSocketClient = webSocketClient,
        _tokenStorage = tokenStorage,
+       _diagnosticLog = diagnosticLog,
        _mapper = mapper,
        _random = random ?? Random() {
     _connectionSubscription = _webSocketClient.connectionState.listen(
@@ -42,6 +44,7 @@ class SignalingClient {
 
   final WebSocketClient _webSocketClient;
   final TokenStorage _tokenStorage;
+  final DiagnosticLog _diagnosticLog;
   final SignalingMessageMapper _mapper;
   final Random _random;
 
@@ -73,10 +76,10 @@ class SignalingClient {
     _leaving = false;
 
     final uri = _buildUri(session.signalingUrl, session.sessionId, deviceId);
-    sonicLog(
+    unawaited(_diagnosticLog.write(
       'Signaling',
       'connect sessionId=${session.sessionId} deviceId=$deviceId uri=$uri',
-    );
+    ));
     // Read fresh on every (re)connect attempt, not just this initial one, so
     // a token that expires mid-outage is picked up before the next retry
     // instead of retrying forever with a stale, now-rejected token.
@@ -85,7 +88,10 @@ class SignalingClient {
 
   Future<Map<String, String>> _resolveHeaders() async {
     final authSession = await _tokenStorage.read();
-    sonicLog('Signaling', 'resolved auth header hasToken=${authSession != null}');
+    unawaited(_diagnosticLog.write(
+      'Signaling',
+      'resolved auth header hasToken=${authSession != null}',
+    ));
     return <String, String>{
       if (authSession != null)
         'Authorization': '${authSession.tokenType} ${authSession.accessToken}',
@@ -114,11 +120,10 @@ class SignalingClient {
 
   void _handleRawMessage(WebSocketMessage raw) {
     final message = _mapper.fromWebSocketMessage(raw);
-    sonicLog(
+    unawaited(_diagnosticLog.write(
       'Signaling',
-      'recv type=${message.type.wireValue} from=${message.from} '
-          'to=${message.to}',
-    );
+      'recv type=${message.type.wireValue} from=${message.from} to=${message.to}',
+    ));
     _messageController.add(message);
 
     switch (message.type) {
@@ -145,7 +150,7 @@ class SignalingClient {
   void _send(SignalingMessageType type, Map<String, Object?> payload, {String? to}) {
     final session = _session;
     if (session == null) return;
-    sonicLog('Signaling', 'send type=${type.wireValue} to=$to');
+    unawaited(_diagnosticLog.write('Signaling', 'send type=${type.wireValue} to=$to'));
     final message = SignalingMessage(
       type: type,
       messageId: _generateMessageId(),
@@ -173,7 +178,7 @@ class SignalingClient {
   /// Closes the socket and stops reconnect attempts. Call when the viewer
   /// leaves the session or the server signals it has ended.
   Future<void> leave() async {
-    sonicLog('Signaling', 'leave sessionId=${_session?.sessionId}');
+    unawaited(_diagnosticLog.write('Signaling', 'leave sessionId=${_session?.sessionId}'));
     _leaving = true;
     await _webSocketClient.disconnect();
   }

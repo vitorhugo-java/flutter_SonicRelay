@@ -71,6 +71,7 @@ void main() {
     final signalingClient = SignalingClient(
       webSocketClient: webSocketClient,
       tokenStorage: FakeTokenStorage(),
+      diagnosticLog: diagnosticLog,
     );
 
     final container = ProviderContainer(
