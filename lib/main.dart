@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'app/di/app_providers.dart';
 import 'app/env/app_config.dart';
@@ -19,6 +20,7 @@ Future<void> main() async {
   final savedForceRelay = await const RelayModeStorage(secureStorage).read();
   final savedKeepPlaying =
       await const BackgroundPlaybackStorage(secureStorage).read();
+  final diagnosticsDirectory = (await getApplicationSupportDirectory()).path;
 
   runApp(
     ProviderScope(
@@ -28,6 +30,7 @@ Future<void> main() async {
         backgroundPlaybackEnabledProvider.overrideWith(
           () => BackgroundPlaybackNotifier(savedKeepPlaying),
         ),
+        diagnosticsDirectoryProvider.overrideWithValue(diagnosticsDirectory),
       ],
       child: const SonicRelayApp(),
     ),

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sonic_relay/app/di/app_providers.dart';
+import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
 import 'package:sonic_relay/core/storage/secure_token_storage.dart';
 import 'package:sonic_relay/core/webrtc/rtc_peer_connection_factory.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
@@ -57,7 +59,9 @@ void main() {
   test('leave tears down the receiver and closes the signaling socket', () async {
     final audio = FakeAudioReceiverService();
     late FakeWebSocketConnection connection;
+    final diagnosticLog = DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_test_').path);
     final webSocketClient = WebSocketClient(
+      diagnosticLog: diagnosticLog,
       connector: (uri, headers) async {
         connection = FakeWebSocketConnection();
         return connection;
@@ -67,6 +71,7 @@ void main() {
     final signalingClient = SignalingClient(
       webSocketClient: webSocketClient,
       tokenStorage: FakeTokenStorage(),
+      diagnosticLog: diagnosticLog,
     );
 
     final container = ProviderContainer(

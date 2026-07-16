@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import '../diagnostics/sonic_log.dart';
+import '../diagnostics/diagnostic_log.dart';
 import 'websocket_message.dart';
 
 enum WebSocketConnectionState {
@@ -11,6 +11,8 @@ enum WebSocketConnectionState {
   reconnecting,
   disconnected,
 }
+
+enum WebSocketDisconnectReason { normal, serverClosed, transportError, connectFailed }
 
 /// A single open transport connection, abstracted so [WebSocketClient] can
 /// be tested without opening a real socket.
@@ -104,15 +106,18 @@ class ReconnectPolicy {
 class WebSocketClient {
   WebSocketClient({
     required WebSocketConnector connector,
+    required DiagnosticLog diagnosticLog,
     ReconnectPolicy reconnectPolicy = const ReconnectPolicy(),
     Timer Function(Duration delay, void Function() callback)? scheduleTimer,
     math.Random? random,
   }) : _connector = connector,
+       _diagnosticLog = diagnosticLog,
        _reconnectPolicy = reconnectPolicy,
        _scheduleTimer = scheduleTimer ?? Timer.new,
        _random = random ?? math.Random();
 
   final WebSocketConnector _connector;
+  final DiagnosticLog _diagnosticLog;
   final ReconnectPolicy _reconnectPolicy;
   final Timer Function(Duration delay, void Function() callback)
   _scheduleTimer;
@@ -121,11 +126,16 @@ class WebSocketClient {
   final _stateController =
       StreamController<WebSocketConnectionState>.broadcast();
   final _messageController = StreamController<WebSocketMessage>.broadcast();
+  final _disconnectReasonController =
+      StreamController<WebSocketDisconnectReason>.broadcast();
 
   Stream<WebSocketConnectionState> get connectionState =>
       _stateController.stream;
 
   Stream<WebSocketMessage> get messages => _messageController.stream;
+
+  Stream<WebSocketDisconnectReason> get disconnectReasons =>
+      _disconnectReasonController.stream;
 
   WebSocketConnection? _connection;
   StreamSubscription<dynamic>? _subscription;
@@ -152,7 +162,7 @@ class WebSocketClient {
       _stateController.add(WebSocketConnectionState.connecting);
     }
     try {
-      sonicLog('WebSocket', 'connecting to $_uri (attempt $_attempt)');
+      unawaited(_diagnosticLog.write('WebSocket', 'connecting to $_uri (attempt $_attempt)'));
       // Resolved fresh on every attempt (not just the first) so a token that
       // expired during the outage is refreshed before the next retry instead
       // of retrying forever with a now-rejected header.
@@ -164,7 +174,7 @@ class WebSocketClient {
       }
       _connection = connection;
       _attempt = 0;
-      sonicLog('WebSocket', 'connected to $_uri');
+      unawaited(_diagnosticLog.write('WebSocket', 'connected to $_uri'));
       _stateController.add(WebSocketConnectionState.connected);
       _subscription = connection.stream.listen(
         (dynamic data) {
@@ -173,17 +183,20 @@ class WebSocketClient {
           }
         },
         onDone: () {
-          sonicLog('WebSocket', 'socket closed by peer');
+          unawaited(_diagnosticLog.write('WebSocket', 'socket closed by peer'));
+          _disconnectReasonController.add(WebSocketDisconnectReason.serverClosed);
           _handleDisconnect();
         },
         onError: (Object error) {
-          sonicLog('WebSocket', 'socket error: $error');
+          unawaited(_diagnosticLog.write('WebSocket', 'socket error'));
+          _disconnectReasonController.add(WebSocketDisconnectReason.transportError);
           _handleDisconnect();
         },
         cancelOnError: true,
       );
     } catch (error) {
-      sonicLog('WebSocket', 'connect failed: $error');
+      unawaited(_diagnosticLog.write('WebSocket', 'connect failed'));
+      _disconnectReasonController.add(WebSocketDisconnectReason.connectFailed);
       _scheduleReconnect();
     }
   }
@@ -224,6 +237,7 @@ class WebSocketClient {
     _subscription = null;
     await _connection?.close();
     _connection = null;
+    _disconnectReasonController.add(WebSocketDisconnectReason.normal);
     _stateController.add(WebSocketConnectionState.disconnected);
   }
 
@@ -231,5 +245,6 @@ class WebSocketClient {
     await disconnect();
     await _stateController.close();
     await _messageController.close();
+    await _disconnectReasonController.close();
   }
 }

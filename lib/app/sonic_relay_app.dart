@@ -1,7 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/diagnostics/sonic_log.dart';
 import 'di/app_providers.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
@@ -34,7 +35,9 @@ class _SonicRelayAppState extends ConsumerState<SonicRelayApp>
     // visibility (via the lifecycle controller below), never be treated as an
     // explicit leave — only a user-initiated Stop/Leave, logout, or terminal
     // connection state closes the active stream.
-    sonicLog('Lifecycle', 'app lifecycle -> $state');
+    unawaited(
+      ref.read(diagnosticLogProvider).write('Lifecycle', 'app lifecycle -> $state'),
+    );
     final inForeground = state == AppLifecycleState.resumed;
     ref
         .read(streamLifecycleControllerProvider)

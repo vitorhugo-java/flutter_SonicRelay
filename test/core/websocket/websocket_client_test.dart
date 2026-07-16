@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
+
+DiagnosticLog _testLog() =>
+    DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_ws_test_').path);
 
 /// A [math.Random] whose [nextDouble] always returns a fixed value, so
 /// jitter-dependent tests get a deterministic sample instead of a real draw.
@@ -40,6 +45,8 @@ class FakeWebSocketConnection implements WebSocketConnection {
   void emit(String data) => _controller.add(data);
 
   void emitDone() => _controller.close();
+
+  void emitError(Object error) => _controller.addError(error);
 }
 
 Timer _instantTimer(Duration delay, void Function() callback) =>
@@ -74,6 +81,7 @@ void main() {
     test('connects and emits connecting then connected', () async {
       final connections = <FakeWebSocketConnection>[];
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           final connection = FakeWebSocketConnection();
           connections.add(connection);
@@ -100,6 +108,7 @@ void main() {
     test('forwards decoded messages from the connection', () async {
       late FakeWebSocketConnection connection;
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           connection = FakeWebSocketConnection();
           return connection;
@@ -120,6 +129,7 @@ void main() {
     test('send forwards raw text to the active connection', () async {
       late FakeWebSocketConnection connection;
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           connection = FakeWebSocketConnection();
           return connection;
@@ -137,6 +147,7 @@ void main() {
     test('reconnects with backoff after the connection drops', () async {
       final connections = <FakeWebSocketConnection>[];
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           final connection = FakeWebSocketConnection();
           connections.add(connection);
@@ -172,6 +183,7 @@ void main() {
       var attempts = 0;
       final connections = <FakeWebSocketConnection>[];
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           attempts++;
           if (attempts < 3) {
@@ -199,6 +211,7 @@ void main() {
       final connections = <FakeWebSocketConnection>[];
       final delays = <Duration>[];
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           final connection = FakeWebSocketConnection();
           connections.add(connection);
@@ -229,6 +242,7 @@ void main() {
       final headersSeen = <Map<String, String>>[];
       var callCount = 0;
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           headersSeen.add(headers);
           final connection = FakeWebSocketConnection();
@@ -260,6 +274,7 @@ void main() {
     test('disconnect stops reconnect attempts', () async {
       final connections = <FakeWebSocketConnection>[];
       final client = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           final connection = FakeWebSocketConnection();
           connections.add(connection);
@@ -276,6 +291,95 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(connections, hasLength(1));
+    });
+
+    test('disconnectReasons emits serverClosed when the peer closes the socket', () async {
+      final connections = <FakeWebSocketConnection>[];
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          final connection = FakeWebSocketConnection();
+          connections.add(connection);
+          return connection;
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+      final reasons = <WebSocketDisconnectReason>[];
+      final sub = client.disconnectReasons.listen(reasons.add);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      connections.single.emitDone();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(reasons, [WebSocketDisconnectReason.serverClosed]);
+      await sub.cancel();
+    });
+
+    test('disconnectReasons emits transportError on a stream error', () async {
+      final connections = <FakeWebSocketConnection>[];
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          final connection = FakeWebSocketConnection();
+          connections.add(connection);
+          return connection;
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+      final reasons = <WebSocketDisconnectReason>[];
+      final sub = client.disconnectReasons.listen(reasons.add);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      connections.single.emitError(Exception('boom'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(reasons, [WebSocketDisconnectReason.transportError]);
+      await sub.cancel();
+    });
+
+    test('disconnectReasons emits connectFailed when the connector throws', () async {
+      var attempts = 0;
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async {
+          attempts++;
+          if (attempts == 1) throw Exception('connect failed');
+          return FakeWebSocketConnection();
+        },
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+      final reasons = <WebSocketDisconnectReason>[];
+      final sub = client.disconnectReasons.listen(reasons.add);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(reasons, [WebSocketDisconnectReason.connectFailed]);
+      await sub.cancel();
+    });
+
+    test('disconnectReasons emits normal on an explicit disconnect', () async {
+      final client = WebSocketClient(
+        diagnosticLog: _testLog(),
+        connector: (uri, headers) async => FakeWebSocketConnection(),
+        scheduleTimer: _instantTimer,
+      );
+      addTearDown(client.dispose);
+      final reasons = <WebSocketDisconnectReason>[];
+      final sub = client.disconnectReasons.listen(reasons.add);
+
+      await client.connect(Uri.parse('wss://example.test/ws'));
+      await client.disconnect();
+      // The broadcast stream delivers via a microtask, so let it flush before
+      // asserting — the same pattern other tests in this file use for
+      // disconnectReasons/connectionState events.
+      await Future<void>.delayed(Duration.zero);
+
+      expect(reasons, [WebSocketDisconnectReason.normal]);
+      await sub.cancel();
     });
   });
 }

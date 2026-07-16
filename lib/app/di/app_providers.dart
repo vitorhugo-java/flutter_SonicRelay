@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../core/diagnostics/diagnostic_log.dart';
 import '../../core/http/auth_interceptor.dart';
 import '../../core/http/dio_client.dart';
 import '../../core/storage/background_playback_storage.dart';
@@ -32,6 +33,17 @@ import '../env/app_config.dart';
 
 final secureStorageProvider = Provider<FlutterSecureStorage>(
   (ref) => const FlutterSecureStorage(),
+);
+
+/// The directory DiagnosticLog writes under — resolved once at startup (see
+/// main.dart) since path_provider's directory lookup is async and this
+/// provider must be synchronous to construct DiagnosticLog eagerly.
+final diagnosticsDirectoryProvider = Provider<String>(
+  (ref) => throw UnimplementedError('overridden in main()'),
+);
+
+final diagnosticLogProvider = Provider<DiagnosticLog>(
+  (ref) => DiagnosticLog(ref.watch(diagnosticsDirectoryProvider)),
 );
 
 final serverConfigStorageProvider = Provider<ServerConfigStorage>(
@@ -156,13 +168,17 @@ final devicePlatformProvider = Provider<String>(
 );
 
 final webSocketClientProvider = Provider<WebSocketClient>(
-  (ref) => WebSocketClient(connector: ioWebSocketConnector),
+  (ref) => WebSocketClient(
+    connector: ioWebSocketConnector,
+    diagnosticLog: ref.watch(diagnosticLogProvider),
+  ),
 );
 
 final signalingClientProvider = Provider<SignalingClient>(
   (ref) => SignalingClient(
     webSocketClient: ref.watch(webSocketClientProvider),
     tokenStorage: ref.watch(tokenStorageProvider),
+    diagnosticLog: ref.watch(diagnosticLogProvider),
   ),
 );
 

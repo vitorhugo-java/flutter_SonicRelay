@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,8 +20,14 @@ class EmptyTokenStorage implements TokenStorage {
   Future<void> write(AuthSession session) async {}
 }
 
+String _testDiagnosticsDirectory() =>
+    Directory.systemTemp.createTempSync('sonicrelay_app_test_').path;
+
 ProviderScope testApp() => ProviderScope(
-  overrides: [tokenStorageProvider.overrideWithValue(EmptyTokenStorage())],
+  overrides: [
+    tokenStorageProvider.overrideWithValue(EmptyTokenStorage()),
+    diagnosticsDirectoryProvider.overrideWithValue(_testDiagnosticsDirectory()),
+  ],
   child: const SonicRelayApp(),
 );
 
@@ -45,9 +53,22 @@ void main() {
   testWidgets('feature pages show presentation-only status content', (
     tester,
   ) async {
+    // Fixed once per test: the ProviderScope below is reused (updated, not
+    // recreated) by Flutter's element diffing across the three pumpWidget
+    // calls, since it has no distinguishing key. Regenerating this value on
+    // every pumpPage call made diagnosticsDirectoryProvider look "changed" on
+    // each pump, cascading an invalidation down to the non-autoDispose
+    // listenerViewModelProvider and making it rebuild on its existing
+    // Notifier instance — which crashed on the `late final` fields in
+    // ListenerViewModel.build() already being set from the first pump.
+    final diagnosticsDirectory = _testDiagnosticsDirectory();
+
     Future<void> pumpPage(Widget page) async {
       await tester.pumpWidget(
         ProviderScope(
+          overrides: [
+            diagnosticsDirectoryProvider.overrideWithValue(diagnosticsDirectory),
+          ],
           child: MaterialApp(
             theme: ThemeData.dark(useMaterial3: true),
             home: page,

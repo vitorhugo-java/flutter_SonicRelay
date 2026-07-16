@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../../../app/di/app_providers.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/widgets/sonic_button.dart';
@@ -75,6 +77,13 @@ class SettingsPage extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(height: AppSpacing.xl),
+                  Text(
+                    'Diagnostics',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  const _DiagnosticsSection(),
                   const SizedBox(height: AppSpacing.xl),
                   Row(
                     children: [
@@ -220,6 +229,115 @@ class _DeleteAccountButtonState extends ConsumerState<_DeleteAccountButton> {
               )
             : const Icon(Icons.delete_forever_rounded, size: 20),
         label: Text(_isDeleting ? 'Deleting…' : 'Delete account'),
+      ),
+    );
+  }
+}
+
+class _DiagnosticsSection extends ConsumerStatefulWidget {
+  const _DiagnosticsSection();
+
+  @override
+  ConsumerState<_DiagnosticsSection> createState() => _DiagnosticsSectionState();
+}
+
+class _DiagnosticsSectionState extends ConsumerState<_DiagnosticsSection> {
+  bool _isBusy = false;
+  String? _message;
+
+  Future<void> _export() async {
+    setState(() {
+      _isBusy = true;
+      _message = null;
+    });
+    try {
+      final path = await ref.read(diagnosticLogProvider).export();
+      if (!mounted) return;
+      await SharePlus.instance.share(ShareParams(files: [XFile(path)]));
+      setState(() => _message = 'Exported diagnostics log.');
+    } catch (_) {
+      setState(() => _message = 'Export failed: could not write the log file.');
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  Future<void> _confirmAndClear() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear diagnostics log?'),
+        content: const Text(
+          'This permanently deletes the on-device diagnostics log. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isBusy = true;
+      _message = null;
+    });
+    try {
+      await ref.read(diagnosticLogProvider).clear();
+      setState(() => _message = 'Cleared the diagnostics log.');
+    } catch (_) {
+      setState(() => _message = 'Clear failed: could not delete the log file(s).');
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SonicCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _SettingsRow(
+            icon: Icons.bug_report_outlined,
+            title: 'Diagnostics log',
+            subtitle: 'Redacted connection/session history for support requests',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: SonicButton(
+                  label: 'Export logs',
+                  icon: Icons.ios_share_rounded,
+                  onPressed: _isBusy ? null : _export,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: SonicButton(
+                  label: 'Clear logs',
+                  icon: Icons.delete_outline_rounded,
+                  isSecondary: true,
+                  onPressed: _isBusy ? null : _confirmAndClear,
+                ),
+              ),
+            ],
+          ),
+          if (_message case final message?) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(message, style: Theme.of(context).textTheme.bodyMedium),
+          ],
+        ],
       ),
     );
   }

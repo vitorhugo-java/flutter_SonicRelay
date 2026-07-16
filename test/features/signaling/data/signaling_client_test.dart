@@ -1,13 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sonic_relay/core/diagnostics/diagnostic_log.dart';
 import 'package:sonic_relay/core/storage/secure_token_storage.dart';
 import 'package:sonic_relay/core/websocket/websocket_client.dart';
 import 'package:sonic_relay/features/auth/domain/auth_session.dart';
 import 'package:sonic_relay/features/sessions/domain/stream_session.dart';
 import 'package:sonic_relay/features/signaling/data/signaling_client.dart';
 import 'package:sonic_relay/features/signaling/domain/signaling_message_type.dart';
+
+DiagnosticLog _testLog() =>
+    DiagnosticLog(Directory.systemTemp.createTempSync('sonicrelay_test_').path);
 
 class FakeWebSocketConnection implements WebSocketConnection {
   final _controller = StreamController<dynamic>.broadcast();
@@ -60,6 +65,7 @@ void main() {
     requestedUris = [];
     requestedHeaders = [];
     final webSocketClient = WebSocketClient(
+      diagnosticLog: _testLog(),
       connector: (uri, headers) async {
         requestedUris.add(uri);
         requestedHeaders.add(headers);
@@ -78,6 +84,7 @@ void main() {
           tokenType: 'Bearer',
         ),
       ),
+      diagnosticLog: _testLog(),
     );
     session = StreamSession(
       sessionId: 'session-1',
@@ -189,6 +196,7 @@ void main() {
       final headersSeen = <Map<String, String>>[];
       late FakeWebSocketConnection localConnection;
       final webSocketClient = WebSocketClient(
+        diagnosticLog: _testLog(),
         connector: (uri, headers) async {
           headersSeen.add(headers);
           localConnection = FakeWebSocketConnection();
@@ -199,6 +207,7 @@ void main() {
       final client = SignalingClient(
         webSocketClient: webSocketClient,
         tokenStorage: tokenStorage,
+        diagnosticLog: _testLog(),
       );
       addTearDown(client.dispose);
 
